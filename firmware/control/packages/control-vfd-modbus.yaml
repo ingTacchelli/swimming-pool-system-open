@@ -1,0 +1,123 @@
+# =============================================================================
+# SPB - control board: Toshiba VF-S15 inverter over RS-485 / Modbus RTU
+#
+#   GPIO1  TX      GPIO42  RX      GPIO2  DE/RE (flow control)
+#   Drive parameters: f829 = 1 (Modbus RTU), f800/f801 = 19200 bps, even parity.
+#
+# HARDWARE REQUIREMENT: R63 must be a pull-DOWN resistor to ground, not a pull-up
+# to VCC. With a pull-up, between power-up and the moment the firmware takes
+# over GPIO2 the MAX3485 stays in transmit mode and holds the bus: the inverter
+# cannot answer and Modbus never starts. If Modbus does not respond, check this
+# first.
+#
+# Registers used (from the VF-S15 RS-485 communication manual):
+#   FA00  run/direction command           (write)
+#   FA01  frequency reference             (write, 0.01 Hz)
+#   FD00  output frequency                (read, 0.01 Hz)
+#   FD01  status                          (read)
+#   FD03  output current                  (read, % of rated current)
+#   FC91  alarms                          (read)
+#
+# TO VERIFY on your drive: the exact scale of FD03 (percentage of the rated
+# current set in f601) and the FA00 bits for run/stop. Until confirmed, the
+# displayed current is indicative.
+# =============================================================================
+
+uart:
+  - id: uart_rs485
+    tx_pin: GPIO1
+    rx_pin: GPIO42
+    baud_rate: 19200
+    data_bits: 8
+    parity: EVEN
+    stop_bits: 1
+
+modbus:
+  - id: modbus_vfd
+    uart_id: uart_rs485
+    flow_control_pin: GPIO2
+    send_wait_time: 250ms
+
+modbus_controller:
+  - id: vfd
+    address: ${vfd_modbus_address}
+    modbus_id: modbus_vfd
+    update_interval: 2s
+    setup_priority: -10
+    command_throttle: 100ms
+
+sensor:
+  - platform: modbus_controller
+    modbus_controller_id: vfd
+    id: vfd_frequency
+    name: "VFD output frequency"
+    register_type: holding
+    address: 0xFD00
+    value_type: U_WORD
+    unit_of_measurement: "Hz"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: vfd
+    id: vfd_current
+    name: "VFD output current"
+    register_type: holding
+    address: 0xFD03
+    value_type: U_WORD
+    unit_of_measurement: "%"
+    accuracy_decimals: 1
+    filters:
+      - multiply: 0.01
+
+  - platform: modbus_controller
+    modbus_controller_id: vfd
+    id: vfd_alarm
+    name: "VFD alarm code"
+    register_type: holding
+    address: 0xFC91
+    value_type: U_WORD
+    accuracy_decimals: 0
+
+number:
+  - platform: modbus_controller
+    modbus_controller_id: vfd
+    id: vfd_setpoint
+    name: "VFD requested frequency"
+    address: 0xFA01
+    value_type: U_WORD
+    register_type: holding
+    min_value: ${freq_min_hz}
+    max_value: ${freq_max_hz}
+    step: 0.1
+    unit_of_measurement: "Hz"
+    multiply: 100          # Hz -> hundredths of Hz
+    mode: box
+
+switch:
+  - platform: modbus_controller
+    modbus_controller_id: vfd
+    id: vfd_run
+    name: "VFD run command"
+    register_type: holding
+    address: 0xFA00
+    # TO VERIFY in the VF-S15 manual: which FA00 bit commands forward run.
+    # Test this switch on the bench before connecting a pump.
+    bitmask: 0x0001
+    restore_mode: ALWAYS_OFF
+
+binary_sensor:
+  - platform: template
+    name: "Filtration pump running"
+    id: pump_running
+    lambda: |-
+      if (isnan(id(vfd_frequency).state)) return {};
+      return id(vfd_frequency).state > 1.0f;
+
+  - platform: template
+    name: "VFD Modbus link"
+    id: vfd_online
+    device_class: connectivity
+    lambda: |-
+      return !isnan(id(vfd_frequency).state);

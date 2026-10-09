@@ -1,0 +1,127 @@
+# =============================================================================
+# SPB - control board: outputs
+#
+# Dosing and filtration relays (50N06 MOSFET + coil + dry contact).
+# The gates have 10 kOhm pull-downs on the board (R29/R30/R31/R32), so during
+# boot and flashing the relays stay off even with the GPIOs floating. The
+# firmware also puts them in the safe state at boot.
+#
+#   GPIO18  CN8  "ACIDO"       -> dosing_relay_acid
+#   GPIO7   CN18 "DOSATRICE"   -> dosing_relay_chlorine
+#   GPIO17  CN7  "PH"          -> dosing_relay_reserve
+#   GPIO10  CN9  "FILTRAGGIO"  -> filtration_relay
+#
+#   The mapping between silkscreen and pump is explained at the top of
+#   spb-control.yaml. If your wiring differs, change only the pins below.
+#
+# Solenoid valves (UCC27517 gate driver + 50N06 MOSFET, powered from +12 V):
+#   GPIO14 EV1 / GPIO13 EV2 / GPIO12 EV3 / GPIO11 EV4
+#
+# All outputs are active high and start off (safe state).
+# =============================================================================
+
+switch:
+  - platform: gpio
+    id: dosing_relay_acid
+    name: "Acid dosing"
+    pin: GPIO18
+    restore_mode: ALWAYS_OFF
+    icon: mdi:flask
+
+  - platform: gpio
+    id: dosing_relay_chlorine
+    name: "Chlorine dosing"
+    pin: GPIO7
+    restore_mode: ALWAYS_OFF
+    icon: mdi:flask
+
+  - platform: gpio
+    id: dosing_relay_reserve
+    name: "Reserve dosing"
+    pin: GPIO17
+    restore_mode: ALWAYS_OFF
+    icon: mdi:flask
+
+  - platform: gpio
+    id: filtration_relay
+    name: "Filtration relay"
+    pin: GPIO10
+    restore_mode: ALWAYS_OFF
+    icon: mdi:pump
+
+  - platform: gpio
+    id: ev1
+    name: "EV1 waterfall"
+    pin: GPIO14
+    restore_mode: ALWAYS_OFF
+    icon: mdi:valve
+
+  - platform: gpio
+    id: ev2
+    name: "EV2 jets"
+    pin: GPIO13
+    restore_mode: ALWAYS_OFF
+    icon: mdi:valve
+
+  - platform: gpio
+    id: ev3
+    name: "EV3 misters"
+    pin: GPIO12
+    restore_mode: ALWAYS_OFF
+    icon: mdi:valve
+
+  - platform: gpio
+    id: ev4
+    name: "EV4 reserve"
+    pin: GPIO11
+    restore_mode: ALWAYS_OFF
+    icon: mdi:valve
+
+# -----------------------------------------------------------------------------
+# Pulsed dosing (jog): manual dosing is never a continuous ON.
+# Each script turns the relay on for a limited time and turns it off by itself,
+# even if whoever sent the command has left or the UART link has dropped.
+# -----------------------------------------------------------------------------
+script:
+  - id: jog_acid
+    mode: restart
+    parameters:
+      seconds: int
+    then:
+      - switch.turn_on: dosing_relay_acid
+      - delay: !lambda "return seconds * 1000 > ${jog_max_ms} ? ${jog_max_ms} : seconds * 1000;"
+      - switch.turn_off: dosing_relay_acid
+
+  - id: jog_chlorine
+    mode: restart
+    parameters:
+      seconds: int
+    then:
+      - switch.turn_on: dosing_relay_chlorine
+      - delay: !lambda "return seconds * 1000 > ${jog_max_ms} ? ${jog_max_ms} : seconds * 1000;"
+      - switch.turn_off: dosing_relay_chlorine
+
+  - id: jog_reserve
+    mode: restart
+    parameters:
+      seconds: int
+    then:
+      - switch.turn_on: dosing_relay_reserve
+      - delay: !lambda "return seconds * 1000 > ${jog_max_ms} ? ${jog_max_ms} : seconds * 1000;"
+      - switch.turn_off: dosing_relay_reserve
+
+  # Safe state: used at boot, on emergency, and when the selector goes to ZERO
+  - id: go_to_safe_state
+    mode: single
+    then:
+      - script.stop: jog_acid
+      - script.stop: jog_chlorine
+      - script.stop: jog_reserve
+      - switch.turn_off: dosing_relay_acid
+      - switch.turn_off: dosing_relay_chlorine
+      - switch.turn_off: dosing_relay_reserve
+      - switch.turn_off: ev1
+      - switch.turn_off: ev2
+      - switch.turn_off: ev3
+      - switch.turn_off: ev4
+      - logger.log: "Safe state applied"

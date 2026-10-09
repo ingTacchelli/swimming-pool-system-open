@@ -1,0 +1,92 @@
+# =============================================================================
+# SPB Swimming Pool Board - CONTROL BOARD firmware (ESPHome)
+# ESP32-S3-DevKitC-1 (N16R8) plugged into the custom PCB.
+#
+# Build and flash this file:   esphome run spb-control.yaml
+# The actual blocks live in the packages under packages/.
+#
+# ---------------------------------------------------------------------------
+# GPIO MAP
+#
+#   GPIO1   RS-485 TX (VFD)              GPIO17  relay CN7  "PH"
+#   GPIO2   RS-485 DE/RE                 GPIO18  relay CN8  "ACIDO"
+#   GPIO4   ultrasonic TRIG (common)     GPIO21  IN4 via optocoupler (conn. U29 pin 1)
+#   GPIO5   1-Wire bus (DS18B20)         GPIO39  ultrasonic ECHO 3 (IN3)
+#   GPIO6   MCP23017 INT (active low)    GPIO40  ultrasonic ECHO 2 (IN2)
+#   GPIO7   relay CN18 "DOSATRICE"       GPIO41  ultrasonic ECHO 1 (IN1)
+#   GPIO8   I2C SDA                      GPIO42  RS-485 RX (VFD)
+#   GPIO9   I2C SCL                      GPIO47  FLOW B via optocoupler (U29 pin 2)
+#   GPIO10  relay CN9 "FILTRAGGIO"       GPIO48  FLOW A via optocoupler (U29 pin 3)
+#   GPIO11  EV4    GPIO12 EV3
+#   GPIO13  EV2    GPIO14 EV1            GPIO15/16  UART to the display panel
+#
+#   Free: GPIO3, 35, 36, 37, 38, 46
+#
+#   GPIO48 note: on DevKitC-1 v1.0 modules GPIO48 drives the on-board RGB LED
+#   (on v1.1 it is GPIO38). Here GPIO48 counts flow pulses, so that LED cannot
+#   be used. Check the module silkscreen before mounting it.
+#
+# ---------------------------------------------------------------------------
+# RELAY OUTPUT NAMING
+#
+#   The schematic silkscreen and the firmware use different names for the three
+#   dosing pumps. The mapping used here is:
+#       CN8  "ACIDO"     -> dosing_relay_acid    (GPIO18)
+#       CN18 "DOSATRICE" -> dosing_relay_chlorine    (GPIO7)
+#       CN7  "PH"        -> dosing_relay_reserve  (GPIO17)
+#   If you wire the pumps differently, change only the pins in the switch
+#   block of packages/control-outputs.yaml: everything else uses the ids.
+# ---------------------------------------------------------------------------
+# FIELD-TUNED VALUES: all of them are below, in one place.
+# =============================================================================
+
+substitutions:
+  device_name: "spb-control"
+  device_friendly_name: "SPB Pool Control"
+
+  # --- 4-20 mA acquisition --------------------------------------------------
+  # Sense resistors on the INA3221 inputs (R229..R233 and siblings).
+  shunt_4_20ma: "5.6 ohm"
+
+  # --- analog input CN12 channel 1 (AIN3) ------------------------------------
+  # Configured for 0-10 V: divider 3k3 / (205 + 2k) with no jumpers, ratio 0.4005,
+  # so 10 V at the input = 4.005 V on AIN3.
+  # If you close the two jumpers the channel becomes 4-20 mA on 205 ohm: in that
+  # case the "filter_pressure" lambda in control-bus-sensors.yaml must be rewritten.
+  cn12_full_scale_v: "10.0"      # input voltage at full scale
+  cn12_ratio: "0.4005"         # volts on AIN3 per volt at the input
+  pressure_full_scale_bar: "4.0"
+
+  # --- flow meters ------------------------------------------------------------
+  k_factor_pulses_per_litre: "450"        # pulses per litre of your flow meter
+  flow_min_main: "5.0"     # m3/h below which dosing is not allowed
+  flow_min_cell: "0.3"          # minimum m3/h in the measuring cell
+
+  # --- chemical tanks ---------------------------------------------------------
+  tank_empty_m: "0.60"            # sensor-to-liquid distance, tank empty
+  tank_full_m: "0.15"            # sensor-to-liquid distance, tank full
+  tank_litres: "25"
+  dosing_pump_litres_per_s: "0.0008"   # dosing pump flow, litres per second
+
+  # --- probes -----------------------------------------------------------------
+  ph_disagreement_threshold: "0.30"    # max primary/secondary pH difference
+  orp_disagreement_threshold: "40"     # max primary/secondary ORP difference, mV
+
+  # --- inverter ---------------------------------------------------------------
+  vfd_modbus_address: "1"
+  freq_min_hz: "25"
+  freq_max_hz: "50"
+  freq_normal_hz: "42"
+
+  # --- manual command safety ---------------------------------------------------
+  jog_max_ms: "60000"              # maximum duration of a manual dosing pulse
+  backwash_wash_s: "120"
+  backwash_rinse_s: "30"
+
+packages:
+  base:     !include packages/control-base.yaml
+  sensors:  !include packages/control-bus-sensors.yaml
+  outputs:  !include packages/control-outputs.yaml
+  vfd:      !include packages/control-vfd-modbus.yaml
+  logic:    !include packages/control-logic.yaml
+  display:  !include packages/control-link-display.yaml

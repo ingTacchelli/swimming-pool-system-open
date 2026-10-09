@@ -1,0 +1,2582 @@
+# =============================================================================
+# SPB Swimming Pool Board - DISPLAY PANEL firmware (ESPHome)
+# Waveshare ESP32-S3-Touch-LCD-7B (1024x600, GT911 touch, CH32V003 expander)
+#
+# Single self-contained file: it includes nothing else.
+#
+# No predefined display model is used. The Waveshare 1024x600 profiles of
+# mipi_rgb are those of the 5" board, which carries a different expander and
+# requires it to be configured. The 7B carries a CH32V003, so the panel is
+# described pin by pin, with timings verified on the real board.
+#
+# Seven pages with a navigation bar on the left. The UART protocol was tested
+# in both directions with the simulator in firmware/simulator.
+#
+# GPIO MAP
+#   GPIO43/44  UART to the control board, on the 4-pin header H3.
+#              GPIO15 and GPIO16 are NOT usable as TTL on this board: they are
+#              wired to the SP3485 and form the RS-485 pair (IO15 = RS485_TX,
+#              IO16 = RS485_RX in the allocation table of the Waveshare
+#              schematic, sheet 1). The only TTL UART brought out is UART0 on
+#              GPIO43/44, which goes through U13 (FSUSB42UMX, 2:1 switch) and
+#              ends either on the CH343P USB-serial bridge or on header H3,
+#              depending on SW1. Keep SW1 on the position that routes the UART
+#              to H3.
+#   GPIO8/9    I2C (GT911 touch + CH32V003 expander)
+#   GPIO4      touch interrupt
+#   GPIO5 DE / GPIO46 HSYNC / GPIO3 VSYNC / GPIO7 PCLK
+#   red    1, 2, 42, 41, 40
+#   green  39, 0, 45, 48, 47, 21
+#   blue   14, 38, 18, 17, 10
+# =============================================================================
+
+substitutions:
+  device_name: "spb-display"
+  device_friendly_name: "SPB Pool Panel"
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${device_friendly_name}
+  comment: "SPB pool touch panel"
+  min_version: "2025.8.0"
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+    sdkconfig_options:
+      # --- RGB panel smoothness ---------------------------------------------
+      # Goal: make the LVGL draw buffer fit in internal SRAM. ESPHome tries
+      # that by itself, but if it cannot find a contiguous block it falls back
+      # to PSRAM, and LVGL then draws on the same bus the panel DMA is reading
+      # continuously.
+      #
+      # This option moves the Wi-Fi and LWIP buffers to PSRAM and frees several
+      # tens of KB of internal SRAM. The extra PSRAM traffic is negligible: a
+      # few hundred KB/s against about 40 MB/s of panel scanout.
+      CONFIG_SPIRAM_TRY_ALLOCATE_WIFI_LWIP: "y"
+      # Data cache from 32 to 64 KB with a 64-byte line instead of 32: fewer
+      # misses on PSRAM accesses. It costs 32 KB of internal SRAM, so it pulls
+      # in the opposite direction to the line above: if the log says the
+      # internal buffer does not fit, remove this first.
+      CONFIG_ESP32S3_DATA_CACHE_64KB: "y"
+      CONFIG_ESP32S3_DATA_CACHE_LINE_64B: "y"
+  # Do NOT set cpu_frequency: 240MHz -> on this board it prevents boot
+
+psram:
+  mode: octal
+  # 80 MHz is the maximum: 120 MHz exists only for quad PSRAM, and ESPHome
+  # rejects it in octal mode.
+  speed: 80MHz
+
+# --- CH32V003 expander: external component -----------------------------------
+# Not part of ESPHome. It is third-party code compiled together with the
+# firmware, pinned here to a specific commit so that an update of the upstream
+# repository cannot change your firmware under your feet.
+external_components:
+  - source:
+      type: git
+      url: https://github.com/fuzzybear62/esphome-waveshare_io_ch32v003
+      ref: 96fc04c1920a55ee5c2ac68ba826c4fce2abd0e6
+    components: [ waveshare_io_ch32v003 ]
+
+logger:
+  level: INFO
+  # The log MUST go out on the native USB, not on UART0: UART0 (GPIO43/44) is
+  # the link to the control board. With the default, ESPHome would put the
+  # logger on UART0 and log lines would end up inside the protocol frames, plus
+  # a conflict on the same peripheral.
+  # With SW1 on H3 the CH343P bridge is disconnected anyway, so the console is
+  # read from the other USB-C, the native one (GPIO19/20).
+  hardware_uart: USB_SERIAL_JTAG
+
+api:
+  encryption:
+    key: !secret api_key_display
+  reboot_timeout: 0s
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  reboot_timeout: 0s
+  ap:
+    ssid: "SPB-Display-Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  local: true
+
+time:
+  - platform: sntp
+    id: ora_locale
+    timezone: Europe/Rome
+
+# =============================================================================
+# PANEL HARDWARE
+# =============================================================================
+
+i2c:
+  id: bus_i2c
+  sda: GPIO8
+  scl: GPIO9
+  frequency: 400kHz
+  scan: true
+
+waveshare_io_ch32v003:
+  - id: wave_io
+    i2c_id: bus_i2c
+    address: 0x24
+
+output:
+  - platform: waveshare_io_ch32v003
+    id: out_backlight
+    waveshare_io_ch32v003_id: wave_io
+    inverted: true
+    zero_means_zero: true
+    safe_pwm_levels:
+      min_value: 0
+      max_value: 247
+
+light:
+  - platform: monochromatic
+    name: "Backlight"
+    id: backlight
+    output: out_backlight
+    restore_mode: RESTORE_DEFAULT_ON
+    default_transition_length: 200ms
+
+# Fonts are downloaded from Google Fonts at compile time: the machine running
+# the build needs internet access. bpp: 4 gives smooth edges at low cost.
+font:
+  - file: "gfonts://Roboto"
+    id: f_value
+    size: 48
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: f_title
+    size: 30
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: f_text
+    size: 22
+    bpp: 4
+  - file: "gfonts://Roboto"
+    id: f_small
+    size: 17
+    bpp: 4
+
+display:
+  - platform: rpi_dpi_rgb
+    id: screen
+    auto_clear_enabled: false
+    update_interval: never
+    color_order: RGB
+    # 30 MHz, which is also the maximum allowed by the component.
+    # With this panel's timings the full frame is 1386 x 661 pixel clocks, so
+    #   30 MHz -> 30e6 / 916146 = 32.7 Hz
+    #   21 MHz -> 22.9 Hz
+    # and 23 Hz is clearly visible. The pixel clock is not the bottleneck: the
+    # 30 MHz scanout asks about 40 MB/s from an octal PSRAM that delivers well
+    # over a hundred. What matters is where LVGL draws, not how fast the panel
+    # reads.
+    pclk_frequency: 30MHz
+    pclk_inverted: true
+    dimensions:
+      width: 1024
+      height: 600
+    de_pin:
+      number: 5
+    hsync_pin:
+      number: 46
+      ignore_strapping_warning: true
+    vsync_pin:
+      number: 3
+      ignore_strapping_warning: true
+    pclk_pin: 7
+    hsync_pulse_width: 162
+    hsync_back_porch: 152
+    hsync_front_porch: 48
+    vsync_pulse_width: 45
+    vsync_back_porch: 13
+    vsync_front_porch: 3
+    data_pins:
+      red:   [1, 2, 42, 41, 40]
+      green: [39, 0, 45, 48, 47, 21]
+      blue:  [14, 38, 18, 17, 10]
+    reset_pin:
+      waveshare_io_ch32v003: wave_io
+      number: 3
+      mode: OUTPUT
+
+touchscreen:
+  - platform: gt911
+    id: touch
+    i2c_id: bus_i2c
+    display: screen
+    interrupt_pin: GPIO4
+    reset_pin:
+      waveshare_io_ch32v003: wave_io
+      number: 1
+      mode: OUTPUT
+
+# =============================================================================
+# UART LINK TO THE CONTROL BOARD
+#
+#   GPIO43 TX -> RX of the control board (GPIO16 on the control side)
+#   GPIO44 RX <- TX of the control board (GPIO15 on the control side)
+#   common GND
+#   115200 8N1
+#
+# Both signals come out on the 4-pin header H3:
+#   pin 1  3V3      <- output, do NOT power it from outside
+#   pin 2  GND
+#   pin 3  EX_RXD   = GPIO44, input    <- the other board's TX goes here
+#   pin 4  EX_TXD   = GPIO43, output   -> the other board's RX goes here
+#
+# At power-up the ROM bootloader prints one line on GPIO43 at 115200. It is
+# unavoidable and harmless: it does not start with 'S', 'A' or 'C' and the
+# checksum discards it anyway.
+#
+# It receives S frames (status) and A frames (command replies), and sends C
+# frames (commands). See docs/uart-protocol.md.
+#
+# All values live in globals: the LVGL pages only read them. If no valid S
+# frame arrives for 3 seconds, g_stale becomes true and the UI says so.
+# =============================================================================
+
+uart:
+  - id: uart_ctrl
+    tx_pin: GPIO43
+    rx_pin: GPIO44
+    baud_rate: 115200
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1
+    rx_buffer_size: 1024
+
+globals:
+  - id: rx_buf
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: g_last_rx
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_stale
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+
+  # --- plant state received from the control board ---------------------------
+  - id: g_mode
+    type: std::string
+    restore_value: false
+    initial_value: '"?"'
+  - id: g_tv
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_tc
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_ph
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_ps
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_or
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_os
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_hz
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_cu
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_q1
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_q2
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_l1
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_l2
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_l3
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: g_pu
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_do
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: g_cs
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: g_al
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: g_ev
+    type: std::string
+    restore_value: false
+    initial_value: '"0000"'
+  - id: g_f1
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: g_f2
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+  - id: g_f3
+    type: bool
+    restore_value: false
+    initial_value: 'true'
+
+  # --- outgoing commands -----------------------------------------------------
+  - id: g_cmd_n
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: g_cmd_pending
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: g_cmd_t
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: g_result
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+  # --- local panel settings ----------------------------------------------------
+  # Not plant state: they live only here and are used to compose the command to
+  # send. The control board remains the only one that decides.
+  - id: g_hz_set
+    type: float
+    restore_value: false
+    initial_value: '42.0f'
+  - id: g_jog_s
+    type: int
+    restore_value: false
+    initial_value: '10'
+
+script:
+  # Sends a command and waits for the ack. The outcome goes to g_result, which the
+  # UI shows: "sent...", "done", or the rejection reason.
+  - id: send_command
+    mode: queued
+    parameters:
+      cmd: string
+      val: string
+    then:
+      - lambda: |-
+          if (id(g_stale)) {
+            id(g_result) = "link down: command not sent";
+            return;
+          }
+          id(g_cmd_n) = (id(g_cmd_n) % 999) + 1;
+          id(g_cmd_pending) = id(g_cmd_n);
+          id(g_cmd_t) = millis();
+          id(g_result) = "command sent, waiting for confirmation";
+
+          char body[120];
+          snprintf(body, sizeof(body), "C|n=%d|c=%s|v=%s|",
+                   id(g_cmd_n), cmd.c_str(), val.c_str());
+          uint8_t x = 0;
+          for (const char *p = body; *p; p++) x ^= (uint8_t) *p;
+          char out[140];
+          snprintf(out, sizeof(out), "%s*%02X\n", body, x);
+          id(uart_ctrl).write_str(out);
+          ESP_LOGI("link", "sent: %s", body);
+      - script.execute: update_ui
+
+  # Highlights the menu entry of the open page.
+  - id: select_page
+    mode: single
+    parameters:
+      idx: int
+    then:
+      - lambda: |-
+          lv_obj_t *b[7] = { id(nav0), id(nav1), id(nav2), id(nav3),
+                             id(nav4), id(nav5), id(nav6) };
+          for (int i = 0; i < 7; i++) {
+            lv_obj_set_style_bg_color(b[i],
+              lv_color_hex(i == idx ? 0x2C3846 : 0x141A21), LV_PART_MAIN);
+          }
+      - script.execute: update_ui
+
+  # Updates all texts. See the long note at the end of the file.
+  - id: update_ui
+    mode: single
+    then:
+      - lambda: |-
+          // c[] = text cache, cc[] = colour cache. Every label has its own fixed
+          // index: the k bases are chosen with margin so that adding a label to
+          // one page does not shift the others. An index shared by two pages
+          // would be a silent bug: the second label would never be updated.
+          static std::string c[64];
+          static int cc[8] = { -1, -1, -1, -1, -1, -1, -1, -1 };
+          int k = 0;
+
+          auto put = [&](lv_obj_t *o, const std::string &v) {
+            if (v != c[k]) { c[k] = v; lv_label_set_text(o, v.c_str()); }
+            k++;
+          };
+          auto col = [](lv_obj_t *o, int slot, int rgb) {
+            if (cc[slot] == rgb) return;
+            cc[slot] = rgb;
+            lv_obj_set_style_text_color(o, lv_color_hex(rgb), LV_PART_MAIN);
+          };
+          auto f1 = [](float v, const char *fmt, const char *vuoto) {
+            if (isnan(v)) return std::string(vuoto);
+            char b[48]; snprintf(b, sizeof(b), fmt, v); return std::string(b);
+          };
+
+          char b[96];
+          const int VERDE = 0x4CAF7D, ROSSO = 0xE05252,
+                    AMBRA = 0xE0A252, GRIGIO = 0x8A97A6, BIANCO = 0xFFFFFF;
+
+          // ============ header and status bar: always =====================
+          std::string m = id(g_mode);
+          std::string modo = "selector ?";
+          if (m == "A") modo = "selector AUTO";
+          else if (m == "M") modo = "selector MANUAL";
+          else if (m == "0") modo = "selector ZERO";
+          put(id(lbl_mode), modo);
+
+          if (id(g_al) == 1) snprintf(b, sizeof(b), "1 active alarm");
+          else snprintf(b, sizeof(b), "%d active alarms", id(g_al));
+          put(id(lbl_alarms), std::string(b));
+          col(id(lbl_alarms), 0, id(g_al) > 0 ? ROSSO : GRIGIO);
+
+          put(id(lbl_link), id(g_stale) ? std::string("link down")
+                                        : std::string("link up"));
+          col(id(lbl_link), 1, id(g_stale) ? ROSSO : VERDE);
+
+          put(id(lbl_result), id(g_result));
+
+          // recurring values, computed once
+          std::string s_ph  = f1(id(g_ph), "%.2f", "--");
+          std::string s_ps  = f1(id(g_ps), "secondary %.2f", "secondary --");
+          std::string s_or  = f1(id(g_or), "%.0f", "--");
+          std::string s_os  = f1(id(g_os), "secondary %.0f", "secondary --");
+          std::string s_tv  = f1(id(g_tv), "%.1f C", "--");
+          std::string s_tc  = f1(id(g_tc), "cell %.1f C", "cell --");
+          std::string s_hz  = !id(g_pu) ? std::string("stopped")
+                                        : f1(id(g_hz), "%.1f Hz", "--");
+          snprintf(b, sizeof(b), "flow %.1f   cell %.1f  m3/h",
+                   isnan(id(g_q1)) ? 0.0f : id(g_q1),
+                   isnan(id(g_q2)) ? 0.0f : id(g_q2));
+          std::string s_port = b;
+          snprintf(b, sizeof(b), "%.0f%%   %.0f%%   %.0f%%",
+                   isnan(id(g_l1)) ? 0.0f : id(g_l1),
+                   isnan(id(g_l2)) ? 0.0f : id(g_l2),
+                   isnan(id(g_l3)) ? 0.0f : id(g_l3));
+          std::string s_liv = b;
+          std::string s_gal = "floats: ";
+          s_gal += id(g_f1) ? "ok  " : "EMPTY  ";
+          s_gal += id(g_f2) ? "ok  " : "EMPTY  ";
+          s_gal += id(g_f3) ? "ok" : "EMPTY";
+          snprintf(b, sizeof(b), "%s   -   permissives %d of 13",
+                   id(g_do) ? "enabled" : "blocked", id(g_cs));
+          std::string s_dos = b;
+
+          std::string ev = id(g_ev);
+          while (ev.length() < 4) ev += '0';
+
+          // ================= only the page actually visible ================
+          // k restarts from a fixed base for each page, so every label always
+          // uses the same cache cell even when the page changes.
+
+          if (id(page_home)->is_showing()) {
+            k = 8;
+            put(id(lbl_ph), s_ph);
+            put(id(lbl_ph2), s_ps);
+            put(id(lbl_orp), s_or);
+            put(id(lbl_orp2), s_os);
+            put(id(lbl_temp), s_tv);
+            put(id(lbl_temp2), s_tc);
+            put(id(lbl_hz), s_hz);
+            put(id(lbl_flow), s_port);
+            put(id(lbl_levels), s_liv);
+            put(id(lbl_floats), s_gal);
+            put(id(lbl_dosing), s_dos);
+            col(id(lbl_dosing), 2, id(g_do) ? VERDE : AMBRA);
+            std::string e = "EV  ";
+            for (int i = 0; i < 4; i++) {
+              e += (i ? "   " : "");
+              e += std::to_string(i + 1);
+              e += ev[i] == '1' ? ": open" : ": closed";
+            }
+            put(id(lbl_ev_home), e);
+
+          } else if (id(page_filtration)->is_showing()) {
+            k = 20;
+            put(id(lbl_f_state), id(g_pu) ? std::string("running")
+                                          : std::string("stopped"));
+            col(id(lbl_f_state), 3, id(g_pu) ? VERDE : GRIGIO);
+            put(id(lbl_f_corrente), f1(id(g_cu), "current %.1f A", "current --"));
+            put(id(lbl_f_hz), f1(id(g_hz), "%.1f Hz", "--"));
+            snprintf(b, sizeof(b), "setpoint %.1f Hz", id(g_hz_set));
+            put(id(lbl_f_set), std::string(b));
+            put(id(lbl_f_flow), s_port);
+
+          } else if (id(page_chemistry)->is_showing()) {
+            k = 26;
+            put(id(lbl_c_ph), s_ph);
+            put(id(lbl_c_ps), s_ps);
+            put(id(lbl_c_or), s_or);
+            put(id(lbl_c_os), s_os);
+            put(id(lbl_c_tv), s_tv);
+            put(id(lbl_c_tc), s_tc);
+            put(id(lbl_c_dosing), s_dos);
+            col(id(lbl_c_dosing), 6, id(g_do) ? VERDE : AMBRA);
+            snprintf(b, sizeof(b), "%d second pulse", id(g_jog_s));
+            put(id(lbl_c_jog), std::string(b));
+
+          } else if (id(page_valves)->is_showing()) {
+            k = 35;
+            lv_obj_t *le[4] = { id(lbl_ev1), id(lbl_ev2), id(lbl_ev3), id(lbl_ev4) };
+            for (int i = 0; i < 4; i++)
+              put(le[i], ev[i] == '1' ? std::string("open")
+                                      : std::string("closed"));
+
+          } else if (id(page_alarms)->is_showing()) {
+            k = 40;
+            put(id(lbl_a_num), std::to_string(id(g_al)));
+            col(id(lbl_a_num), 4, id(g_al) > 0 ? ROSSO : VERDE);
+            snprintf(b, sizeof(b), "%d su 13", id(g_cs));
+            put(id(lbl_a_cs), std::string(b));
+            put(id(lbl_a_do), id(g_do) ? std::string("dosing enabled")
+                                       : std::string("dosing blocked"));
+            put(id(lbl_a_float), s_gal);
+            put(id(lbl_a_link), id(g_stale) ? std::string("stale data")
+                                            : std::string("data up to date"));
+            col(id(lbl_a_link), 5, id(g_stale) ? ROSSO : VERDE);
+            snprintf(b, sizeof(b), "last frame %lu ms ago",
+                     (unsigned long) (millis() - id(g_last_rx)));
+            put(id(lbl_a_age), std::string(b));
+
+          } else if (id(page_maintenance)->is_showing()) {
+            k = 48;
+            float lv[3] = { id(g_l1), id(g_l2), id(g_l3) };
+            lv_obj_t *lb[3] = { id(lbl_m_l1), id(lbl_m_l2), id(lbl_m_l3) };
+            lv_obj_t *bb[3] = { id(bar_l1), id(bar_l2), id(bar_l3) };
+            for (int i = 0; i < 3; i++) {
+              float v = isnan(lv[i]) ? 0.0f : lv[i];
+              lv_bar_set_value(bb[i], (int) v, LV_ANIM_OFF);
+              put(lb[i], f1(lv[i], "%.0f%%", "--"));
+            }
+            snprintf(b, sizeof(b), "last frame %lu ms ago   -   %s",
+                     (unsigned long) (millis() - id(g_last_rx)),
+                     id(g_stale) ? "STALE" : "up to date");
+            put(id(lbl_m_diag), std::string(b));
+
+          } else if (id(page_commands)->is_showing()) {
+            k = 54;
+            put(id(lbl_k_result), id(g_result).empty()
+                                 ? std::string("no command sent")
+                                 : id(g_result));
+            put(id(lbl_k_mode), modo);
+          }
+
+# =============================================================================
+# LVGL USER INTERFACE - seven pages
+#
+# The navigation bar, the header and the status bar are in the top_layer: a
+# single layer drawn above all the pages, so they exist once instead of seven
+# times. The layer itself is transparent and does not intercept touch; only its
+# children do, i.e. the left column and the seven buttons. If the touch ever
+# stops responding on the pages, this is the first place to look.
+#
+# Geometry: column 0..190, content 214..1000, header y 18, status bar y 566.
+# Pages use the band y 56..556.
+# =============================================================================
+
+lvgl:
+  displays:
+    - screen
+  touchscreens:
+    - touch
+  # 12% = one eighth of the screen, the smallest buffer ESPHome accepts: the
+  # value is rounded to 1/1, 1/2, 1/4 or 1/8 and below 19% it always ends at 1/8.
+  # That is 1024 x 600 x 2 / 8 = 150 KB.
+  #
+  # Why not 25%: ESPHome tries internal SRAM when the fraction is at least 1/4,
+  # but a quarter of this screen is 300 KB and a contiguous 300 KB block does not
+  # exist in internal SRAM with Wi-Fi on. The allocation failed and fell back to
+  # PSRAM, which caused both stutter and part of the artefacts: LVGL read and
+  # rewrote PSRAM while the panel DMA was reading it continuously.
+  #
+  # CHECK THE BOOT LOG: if
+  #   "Failed to allocate 153600 bytes for internal draw buffer"
+  # appears, not even 150 KB fit and the buffer is still in PSRAM. In that case
+  # free internal SRAM by removing web_server, and if that is not enough remove
+  # CONFIG_ESP32S3_DATA_CACHE_64KB, which alone takes 32 KB.
+  buffer_size: 12%
+  bg_color: 0x0E1116
+
+  style_definitions:
+    - id: st_panel
+      bg_color: 0x1B222B
+      bg_opa: COVER
+      radius: 12
+      border_width: 0
+      pad_all: 14
+    - id: st_label
+      text_color: 0x8A97A6
+      text_font: f_small
+    - id: st_value
+      text_color: 0xFFFFFF
+      text_font: f_value
+    - id: st_medium
+      text_color: 0xFFFFFF
+      text_font: f_title
+    - id: st_nav
+      bg_color: 0x141A21
+      bg_opa: COVER
+      radius: 8
+      border_width: 0
+
+  # --------------------------------------------------------------------------
+  # Shared layer: navigation column, header, status bar
+  # --------------------------------------------------------------------------
+  top_layer:
+    bg_opa: TRANSP
+    widgets:
+      - obj:
+          id: side_bar
+          x: 0
+          y: 0
+          width: 190
+          height: 600
+          bg_color: 0x141A21
+          bg_opa: COVER
+          radius: 0
+          border_width: 0
+          pad_all: 0
+          widgets:
+            - label:
+                x: 16
+                y: 12
+                text: "SPB"
+                text_color: 0xFFFFFF
+                text_font: f_title
+            - label:
+                x: 16
+                y: 48
+                text: "pool"
+                styles: st_label
+
+            - button:
+                id: nav0
+                styles: st_nav
+                x: 8
+                y: 76
+                width: 174
+                height: 68
+                bg_color: 0x2C3846
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Home"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_home
+                  - script.execute:
+                      id: select_page
+                      idx: 0
+
+            - button:
+                id: nav1
+                styles: st_nav
+                x: 8
+                y: 150
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Filtration"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_filtration
+                  - script.execute:
+                      id: select_page
+                      idx: 1
+
+            - button:
+                id: nav2
+                styles: st_nav
+                x: 8
+                y: 224
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Chemistry"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_chemistry
+                  - script.execute:
+                      id: select_page
+                      idx: 2
+
+            - button:
+                id: nav3
+                styles: st_nav
+                x: 8
+                y: 298
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Valves"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_valves
+                  - script.execute:
+                      id: select_page
+                      idx: 3
+
+            - button:
+                id: nav4
+                styles: st_nav
+                x: 8
+                y: 372
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Alarms"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_alarms
+                  - script.execute:
+                      id: select_page
+                      idx: 4
+
+            - button:
+                id: nav5
+                styles: st_nav
+                x: 8
+                y: 446
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Maintenance"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_maintenance
+                  - script.execute:
+                      id: select_page
+                      idx: 5
+
+            - button:
+                id: nav6
+                styles: st_nav
+                x: 8
+                y: 520
+                width: 174
+                height: 68
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Commands"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_commands
+                  - script.execute:
+                      id: select_page
+                      idx: 6
+
+      # ---- common header ------------------------------------------------
+      - label:
+          id: lbl_mode
+          x: 214
+          y: 18
+          width: 260
+          text: "selector ?"
+          text_color: 0x8A97A6
+          text_font: f_text
+
+      - label:
+          id: lbl_alarms
+          x: 480
+          y: 18
+          width: 210
+          text: "0 active alarms"
+          text_align: CENTER
+          text_color: 0x8A97A6
+          text_font: f_text
+
+      - label:
+          id: lbl_link
+          x: 700
+          y: 18
+          width: 300
+          text: "link down"
+          text_align: RIGHT
+          text_color: 0xE05252
+          text_font: f_text
+
+      # ---- common status bar --------------------------------------------
+      - label:
+          id: lbl_result
+          x: 214
+          y: 566
+          width: 786
+          text: ""
+          text_color: 0x8A97A6
+          text_font: f_text
+
+  pages:
+    # =======================================================================
+    # 1 - HOME: summary, no commands except alarm acknowledge
+    # =======================================================================
+    - id: page_home
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "pH"
+              - label:
+                  id: lbl_ph
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_ph2
+                  styles: st_label
+                  y: 82
+                  text: "secondary --"
+
+        - obj:
+            styles: st_panel
+            x: 482
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "ORP  mV"
+              - label:
+                  id: lbl_orp
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_orp2
+                  styles: st_label
+                  y: 82
+                  text: "secondary --"
+
+        - obj:
+            styles: st_panel
+            x: 750
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Pool temperature"
+              - label:
+                  id: lbl_temp
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_temp2
+                  styles: st_label
+                  y: 82
+                  text: "cell --"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 204
+            width: 384
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Filtration"
+              - label:
+                  id: lbl_hz
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_flow
+                  styles: st_label
+                  y: 82
+                  text: "flow --"
+
+        - obj:
+            styles: st_panel
+            x: 616
+            y: 204
+            width: 384
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Tank levels"
+              - label:
+                  id: lbl_levels
+                  styles: st_medium
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_floats
+                  styles: st_label
+                  y: 82
+                  text: "floats --"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 352
+            width: 786
+            height: 96
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Dosing"
+              - label:
+                  id: lbl_dosing
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 462
+            width: 520
+            height: 86
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Solenoid valves"
+              - label:
+                  id: lbl_ev_home
+                  y: 26
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+        - button:
+            id: btn_ack
+            x: 760
+            y: 468
+            width: 240
+            height: 74
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Silence alarms"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ackal"
+                  val: "1"
+
+    # =======================================================================
+    # 2 - FILTRATION: pump, frequency, flows, scenarios
+    # =======================================================================
+    - id: page_filtration
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 384
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Filtration pump"
+              - label:
+                  id: lbl_f_state
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_f_corrente
+                  styles: st_label
+                  y: 82
+                  text: "current --"
+
+        - obj:
+            styles: st_panel
+            x: 616
+            y: 56
+            width: 384
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "VFD frequency"
+              - label:
+                  id: lbl_f_hz
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_f_set
+                  styles: st_label
+                  y: 82
+                  text: "setpoint --"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 204
+            width: 786
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Flow rates"
+              - label:
+                  id: lbl_f_flow
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+
+        # ---- frequency setting ------------------------------------------
+        - button:
+            x: 214
+            y: 322
+            width: 140
+            height: 70
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "- 1 Hz"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - lambda: |-
+                  id(g_hz_set) -= 1.0f;
+                  if (id(g_hz_set) < 25.0f) id(g_hz_set) = 25.0f;
+              - script.execute: update_ui
+
+        - button:
+            x: 366
+            y: 322
+            width: 140
+            height: 70
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "+ 1 Hz"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - lambda: |-
+                  id(g_hz_set) += 1.0f;
+                  if (id(g_hz_set) > 50.0f) id(g_hz_set) = 50.0f;
+              - script.execute: update_ui
+
+        - button:
+            x: 518
+            y: 322
+            width: 200
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Apply"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "hz"
+                  val: !lambda |-
+                    char b[16];
+                    snprintf(b, sizeof(b), "%.1f", id(g_hz_set));
+                    return std::string(b);
+
+        - button:
+            x: 730
+            y: 322
+            width: 270
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Start pump"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "pump"
+                  val: "1"
+
+        # ---- stop and relay ----------------------------------------------
+        - button:
+            x: 214
+            y: 404
+            width: 270
+            height: 70
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Stop pump"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "pump"
+                  val: "0"
+
+        - button:
+            x: 496
+            y: 404
+            width: 240
+            height: 70
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Filt. relay ON"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "filt"
+                  val: "1"
+
+        - button:
+            x: 748
+            y: 404
+            width: 252
+            height: 70
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Filt. relay OFF"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "filt"
+                  val: "0"
+
+        # ---- scenarios ----------------------------------------------------
+        - label:
+            x: 214
+            y: 492
+            text: "Filtration scenarios"
+            styles: st_label
+
+        - button:
+            x: 214
+            y: 512
+            width: 124
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Normal"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "norm"
+
+        - button:
+            x: 346
+            y: 512
+            width: 124
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Intense"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "int"
+
+        - button:
+            x: 478
+            y: 512
+            width: 124
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Quiet"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "sil"
+
+        - button:
+            x: 610
+            y: 512
+            width: 124
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Heating"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "heat"
+
+        - button:
+            x: 742
+            y: 512
+            width: 124
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Water play"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "play"
+
+        - button:
+            x: 874
+            y: 512
+            width: 126
+            height: 44
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Anti-freeze"
+                  text_color: 0xFFFFFF
+                  text_font: f_small
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "scen"
+                  val: "frost"
+
+    # =======================================================================
+    # 3 - CHEMISTRY: probes, dosing state, manual pulses to the dosing pumps
+    # =======================================================================
+    - id: page_chemistry
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "pH"
+              - label:
+                  id: lbl_c_ph
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_c_ps
+                  styles: st_label
+                  y: 82
+                  text: "secondary --"
+
+        - obj:
+            styles: st_panel
+            x: 482
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "ORP  mV"
+              - label:
+                  id: lbl_c_or
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_c_os
+                  styles: st_label
+                  y: 82
+                  text: "secondary --"
+
+        - obj:
+            styles: st_panel
+            x: 750
+            y: 56
+            width: 250
+            height: 136
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Temperature"
+              - label:
+                  id: lbl_c_tv
+                  styles: st_value
+                  y: 28
+                  text: "--"
+              - label:
+                  id: lbl_c_tc
+                  styles: st_label
+                  y: 82
+                  text: "cell --"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 204
+            width: 786
+            height: 96
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Dosing"
+              - label:
+                  id: lbl_c_dosing
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+
+        # ---- pulse duration ------------------------------------------------
+        - label:
+            x: 214
+            y: 328
+            text: "Pulse duration"
+            text_color: 0x8A97A6
+            text_font: f_text
+
+        - button:
+            x: 420
+            y: 318
+            width: 110
+            height: 56
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "5 s"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - lambda: 'id(g_jog_s) = 5;'
+              - script.execute: update_ui
+
+        - button:
+            x: 542
+            y: 318
+            width: 110
+            height: 56
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "10 s"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - lambda: 'id(g_jog_s) = 10;'
+              - script.execute: update_ui
+
+        - button:
+            x: 664
+            y: 318
+            width: 110
+            height: 56
+            bg_color: 0x2C3846
+            radius: 8
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "20 s"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - lambda: 'id(g_jog_s) = 20;'
+              - script.execute: update_ui
+
+        - label:
+            id: lbl_c_jog
+            x: 794
+            y: 328
+            width: 206
+            text: "-- second pulse"
+            text_align: RIGHT
+            styles: st_label
+
+        # ---- pulses to the three dosing pumps ------------------------------
+        - button:
+            x: 214
+            y: 396
+            width: 250
+            height: 80
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "ACID pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosa"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - button:
+            x: 482
+            y: 396
+            width: 250
+            height: 80
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "CHLORINE pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosc"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - button:
+            x: 750
+            y: 396
+            width: 250
+            height: 80
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "RESERVE pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosr"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - label:
+            x: 214
+            y: 496
+            width: 786
+            text: "Manual dosing is always a pulse: there is no continuous ON that can be commanded from the touch panel. The control board refuses the pulse if the selector is not in MANUAL or if a permissive is missing."
+            styles: st_label
+
+    # =======================================================================
+    # 4 - VALVES: the four solenoid valves
+    # =======================================================================
+    - id: page_valves
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 480
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Solenoid valve 1"
+              - label:
+                  id: lbl_ev1
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+        - button:
+            x: 712
+            y: 71
+            width: 136
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Open"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev1"
+                  val: "1"
+        - button:
+            x: 860
+            y: 71
+            width: 140
+            height: 70
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Close"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev1"
+                  val: "0"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 172
+            width: 480
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Solenoid valve 2"
+              - label:
+                  id: lbl_ev2
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+        - button:
+            x: 712
+            y: 187
+            width: 136
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Open"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev2"
+                  val: "1"
+        - button:
+            x: 860
+            y: 187
+            width: 140
+            height: 70
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Close"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev2"
+                  val: "0"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 288
+            width: 480
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Solenoid valve 3"
+              - label:
+                  id: lbl_ev3
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+        - button:
+            x: 712
+            y: 303
+            width: 136
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Open"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev3"
+                  val: "1"
+        - button:
+            x: 860
+            y: 303
+            width: 140
+            height: 70
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Close"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev3"
+                  val: "0"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 404
+            width: 480
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Solenoid valve 4"
+              - label:
+                  id: lbl_ev4
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+        - button:
+            x: 712
+            y: 419
+            width: 136
+            height: 70
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Open"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev4"
+                  val: "1"
+        - button:
+            x: 860
+            y: 419
+            width: 140
+            height: 70
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Close"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ev4"
+                  val: "0"
+
+        - label:
+            x: 214
+            y: 520
+            width: 786
+            text: "The state shown is the one reported by the control board in the ev field, not the position of the button pressed."
+            styles: st_label
+
+    # =======================================================================
+    # 5 - ALARMS
+    # =======================================================================
+    - id: page_alarms
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 786
+            height: 120
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Active alarms"
+              - label:
+                  id: lbl_a_num
+                  styles: st_value
+                  y: 30
+                  text: "--"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 192
+            width: 384
+            height: 120
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Dosing permissives"
+              - label:
+                  id: lbl_a_cs
+                  styles: st_medium
+                  y: 26
+                  text: "--"
+              - label:
+                  id: lbl_a_do
+                  styles: st_label
+                  y: 68
+                  text: "--"
+
+        - obj:
+            styles: st_panel
+            x: 616
+            y: 192
+            width: 384
+            height: 120
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Tank floats"
+              - label:
+                  id: lbl_a_float
+                  y: 26
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 328
+            width: 786
+            height: 104
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Control board link"
+              - label:
+                  id: lbl_a_link
+                  styles: st_medium
+                  y: 24
+                  text: "--"
+              - label:
+                  id: lbl_a_age
+                  styles: st_label
+                  y: 60
+                  text: "--"
+
+        - button:
+            x: 214
+            y: 452
+            width: 300
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Silence alarms"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ackal"
+                  val: "1"
+
+        - label:
+            x: 540
+            y: 462
+            width: 460
+            text: "The protocol carries only the number of active alarms, not the list. Showing which alarm tripped would need an additional field in the S frame."
+            styles: st_label
+
+    # =======================================================================
+    # 6 - MAINTENANCE: tanks, backwash, link diagnostics
+    # =======================================================================
+    - id: page_maintenance
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 786
+            height: 190
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Tank levels"
+
+              - label:
+                  x: 0
+                  y: 26
+                  text: "Acid"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+              - bar:
+                  id: bar_l1
+                  x: 190
+                  y: 32
+                  width: 420
+                  height: 22
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+              - label:
+                  id: lbl_m_l1
+                  x: 640
+                  y: 26
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+              - label:
+                  x: 0
+                  y: 72
+                  text: "Chlorine"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+              - bar:
+                  id: bar_l2
+                  x: 190
+                  y: 78
+                  width: 420
+                  height: 22
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+              - label:
+                  id: lbl_m_l2
+                  x: 640
+                  y: 72
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+              - label:
+                  x: 0
+                  y: 118
+                  text: "Reserve"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+              - bar:
+                  id: bar_l3
+                  x: 190
+                  y: 124
+                  width: 420
+                  height: 22
+                  min_value: 0
+                  max_value: 100
+                  value: 0
+              - label:
+                  id: lbl_m_l3
+                  x: 640
+                  y: 118
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 262
+            width: 384
+            height: 110
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Backwash"
+              - label:
+                  y: 26
+                  text: "Procedure run by the control board: the panel requests, it does not execute."
+                  width: 356
+                  styles: st_label
+
+        - button:
+            x: 616
+            y: 270
+            width: 186
+            height: 94
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Start"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "back"
+                  val: "1"
+
+        - button:
+            x: 814
+            y: 270
+            width: 186
+            height: 94
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Stop"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "back"
+                  val: "0"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 390
+            width: 786
+            height: 100
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Link diagnostics"
+              - label:
+                  id: lbl_m_diag
+                  y: 26
+                  text: "--"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+
+    # =======================================================================
+    # 7 - MANUAL COMMANDS: the same commands, all together, no frills
+    # =======================================================================
+    - id: page_commands
+      bg_color: 0x0E1116
+      widgets:
+        - label:
+            x: 214
+            y: 58
+            width: 786
+            text: "Direct commands. The control board may refuse them: the reason appears in the bar at the bottom."
+            styles: st_label
+
+        - button:
+            x: 214
+            y: 92
+            width: 250
+            height: 76
+            bg_color: 0x2C5A46
+            radius: 10
+            pressed:
+              bg_color: 0x3E7A62
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Pump ON"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "pump"
+                  val: "1"
+
+        - button:
+            x: 482
+            y: 92
+            width: 250
+            height: 76
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Pump OFF"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "pump"
+                  val: "0"
+
+        - button:
+            x: 750
+            y: 92
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Silence alarms"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "ackal"
+                  val: "1"
+
+        - button:
+            x: 214
+            y: 180
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Filtration ON"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "filt"
+                  val: "1"
+
+        - button:
+            x: 482
+            y: 180
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Filtration OFF"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "filt"
+                  val: "0"
+
+        - button:
+            x: 750
+            y: 180
+            width: 250
+            height: 76
+            bg_color: 0x5A2C2C
+            radius: 10
+            pressed:
+              bg_color: 0x7A3E3E
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Backwash STOP"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "back"
+                  val: "0"
+
+        - button:
+            x: 214
+            y: 268
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Acid pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosa"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - button:
+            x: 482
+            y: 268
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Chlorine pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosc"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - button:
+            x: 750
+            y: 268
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "Reserve pulse"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "dosr"
+                  val: !lambda 'return std::to_string(id(g_jog_s));'
+
+        - button:
+            x: 214
+            y: 356
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "30 Hz"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "hz"
+                  val: "30.0"
+
+        - button:
+            x: 482
+            y: 356
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "40 Hz"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "hz"
+                  val: "40.0"
+
+        - button:
+            x: 750
+            y: 356
+            width: 250
+            height: 76
+            bg_color: 0x2C3846
+            radius: 10
+            pressed:
+              bg_color: 0x4A5B70
+            widgets:
+              - label:
+                  align: CENTER
+                  text: "50 Hz"
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+            on_click:
+              - script.execute:
+                  id: send_command
+                  cmd: "hz"
+                  val: "50.0"
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 444
+            width: 786
+            height: 104
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Last command"
+              - label:
+                  id: lbl_k_result
+                  y: 26
+                  text: "no command sent"
+                  width: 758
+                  text_color: 0xFFFFFF
+                  text_font: f_text
+              - label:
+                  id: lbl_k_mode
+                  styles: st_label
+                  y: 60
+                  text: "--"
+
+# =============================================================================
+# TIMINGS
+#   50ms   UART reception
+#   500ms  link watchdog and unanswered commands
+#   1s     text refresh
+# =============================================================================
+# =============================================================================
+
+interval:
+  # ---------------------------------------------------------------- reception
+  - interval: 50ms
+    then:
+      - lambda: |-
+          while (id(uart_ctrl).available()) {
+            uint8_t c;
+            if (!id(uart_ctrl).read_byte(&c)) break;
+            if (c != '\n' && c != '\r') {
+              if (id(rx_buf).length() < 500) id(rx_buf) += (char) c;
+              continue;
+            }
+            std::string msg = id(rx_buf);
+            id(rx_buf).clear();
+            if (msg.length() < 6) continue;
+
+            size_t st = msg.rfind('*');
+            if (st == std::string::npos || st + 2 >= msg.length()) continue;
+            uint8_t x = 0;
+            for (size_t i = 0; i < st; i++) x ^= (uint8_t) msg[i];
+            char chk[4];
+            snprintf(chk, sizeof(chk), "%02X", x);
+            if (msg.compare(st + 1, 2, chk) != 0) continue;
+
+            auto field = [&](const char *k) -> std::string {
+              std::string key = std::string("|") + k + "=";
+              size_t p = msg.find(key);
+              if (p == std::string::npos) return std::string();
+              p += key.length();
+              size_t e = msg.find('|', p);
+              if (e == std::string::npos || e > st) e = st;
+              return msg.substr(p, e - p);
+            };
+            auto num = [&](const char *k) -> float {
+              std::string v = field(k);
+              if (v.empty()) return NAN;
+              float f = atof(v.c_str());
+              return (f <= -998.0f) ? NAN : f;     // -999 = invalid value
+            };
+
+            if (msg[0] == 'S') {
+              id(g_last_rx) = millis();
+              id(g_stale) = false;
+              std::string mo = field("mo");
+              if (!mo.empty()) id(g_mode) = mo;
+              id(g_tv) = num("tv");
+              id(g_tc) = num("tc");
+              id(g_ph) = num("ph");
+              id(g_ps) = num("ps");
+              id(g_or) = num("or");
+              id(g_os) = num("os");
+              id(g_hz) = num("hz");
+              id(g_cu) = num("cu");
+              id(g_q1) = num("q1");
+              id(g_q2) = num("q2");
+              id(g_l1) = num("l1");
+              id(g_l2) = num("l2");
+              id(g_l3) = num("l3");
+              id(g_pu) = field("pu") == "1";
+              id(g_do) = field("do") == "1";
+              id(g_cs) = atoi(field("cs").c_str());
+              id(g_al) = atoi(field("al").c_str());
+              id(g_f1) = field("f1") == "1";
+              id(g_f2) = field("f2") == "1";
+              id(g_f3) = field("f3") == "1";
+              std::string ev = field("ev");
+              if (ev.length() == 4) id(g_ev) = ev;
+            } else if (msg[0] == 'A') {
+              int n = atoi(field("n").c_str());
+              if (n == id(g_cmd_pending)) {
+                id(g_cmd_pending) = 0;
+                if (field("r") == "ok") id(g_result) = "command executed";
+                else id(g_result) = std::string("refused: ") + field("w");
+              }
+            }
+          }
+
+  # ---------------------------------------------------- link watchdog
+  - interval: 500ms
+    then:
+      - lambda: |-
+          uint32_t now = millis();
+          if (now - id(g_last_rx) > 3000) id(g_stale) = true;
+          // command unanswered within 2 s = failed, never assumed done
+          if (id(g_cmd_pending) != 0 && now - id(g_cmd_t) > 2000) {
+            id(g_cmd_pending) = 0;
+            id(g_result) = "no confirmation from the control board";
+          }
+
+  # ---------------------------------------------------- text refresh
+  # Two measures, both to avoid redrawing more than necessary:
+  #
+  # 1. only the VISIBLE page is updated. The labels of the other six keep their
+  #    text while hidden, and are realigned the moment a page opens, because the
+  #    navigation buttons call update_ui right after the page change.
+  #
+  # 2. every label is rewritten only if its text really changed. Rewriting all of
+  #    them on every pass marked a dozen areas for redraw each second: many
+  #    useless flushes per second, and it was visible.
+  #
+  # When the link is down the values stay at the last ones received but the
+  # header says so: showing old numbers without saying so would be worse than
+  # not showing them.
+  - interval: 1s
+    then:
+      - script.execute: update_ui
+
+# =============================================================================
+# DIAGNOSTICS TOWARDS HOME ASSISTANT
+# =============================================================================
+
+sensor:
+  - platform: uptime
+    name: "Panel uptime"
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "Panel Wi-Fi RSSI"
+    update_interval: 60s
+
+binary_sensor:
+  - platform: template
+    name: "Control board link"
+    device_class: connectivity
+    lambda: 'return !id(g_stale);'
+
+text_sensor:
+  - platform: template
+    name: "Last command result"
+    update_interval: 5s
+    lambda: 'return {id(g_result)};'

@@ -1,0 +1,218 @@
+# =============================================================================
+# SPB - control board: UART link to the display panel
+#
+#   GPIO15 TX -> display GPIO44 (header H3 pin 3, EX_RXD)
+#   GPIO16 RX <- display GPIO43 (header H3 pin 4, EX_TXD)
+#   common GND, 115200 8N1
+#
+#   On the display side the link is NOT on GPIO15/16: on the Waveshare panel
+#   those two pins are the SP3485 RS-485 pair and are not available as TTL.
+#   See docs/uart-protocol.md.
+#
+# Message format: see docs/uart-protocol.md
+#   S|...|*XX\n   status, sent every 500 ms
+#   C|...|*XX\n   command received from the display
+#   A|...|*XX\n   command reply (ok / err + reason)
+#
+# The checksum is the XOR of all characters before the asterisk (last '|'
+# included), as two uppercase hex digits.
+# =============================================================================
+
+uart:
+  - id: uart_panel
+    tx_pin: GPIO15
+    rx_pin: GPIO16
+    baud_rate: 115200
+    data_bits: 8
+    parity: NONE
+    stop_bits: 1
+    rx_buffer_size: 512
+
+globals:
+  - id: rx_buf
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+  - id: commands_received
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: commands_refused
+    type: int
+    restore_value: false
+    initial_value: '0'
+
+interval:
+  # ---------------------------------------------------------------- status -> display
+  - interval: 500ms
+    then:
+      - lambda: |-
+          auto f = [](float v) -> float { return isnan(v) ? -999.0f : v; };
+          const char *mo = id(selector_auto).state ? "A" : (id(selector_manual).state ? "M" : "0");
+          char ev[5];
+          ev[0] = id(ev1).state ? '1' : '0';
+          ev[1] = id(ev2).state ? '1' : '0';
+          ev[2] = id(ev3).state ? '1' : '0';
+          ev[3] = id(ev4).state ? '1' : '0';
+          ev[4] = 0;
+
+          char body[400];
+          snprintf(body, sizeof(body),
+            "S|mo=%s|tv=%.1f|tc=%.1f|ph=%.2f|ps=%.2f|or=%.0f|os=%.0f|hz=%.1f|cu=%.1f"
+            "|pu=%d|q1=%.1f|q2=%.1f|l1=%.0f|l2=%.0f|l3=%.0f|f1=%d|f2=%d|f3=%d"
+            "|ev=%s|do=%d|cs=%.0f|al=%d|",
+            mo,
+            f(id(pool_temperature).state), -999.0f,
+            f(id(ph_primary).state), f(id(ph_secondary).state),
+            f(id(orp_primary).state), f(id(orp_secondary).state),
+            f(id(vfd_frequency).state), f(id(vfd_current).state),
+            id(pump_running).state ? 1 : 0,
+            f(id(main_pulses).state), f(id(cell_pulses).state),
+            f(id(tank1_level).state), f(id(tank2_level).state), f(id(tank3_level).state),
+            id(tank1_float).state ? 1 : 0, id(tank2_float).state ? 1 : 0, id(tank3_float).state ? 1 : 0,
+            ev,
+            id(dosing_enabled).state ? 1 : 0,
+            f(id(permissives_ok).state),
+            id(active_alarms));
+
+          uint8_t x = 0;
+          for (const char *p = body; *p; p++) x ^= (uint8_t) *p;
+          char out[420];
+          snprintf(out, sizeof(out), "%s*%02X\n", body, x);
+          id(uart_panel).write_str(out);
+
+  # ---------------------------------------------------------------- commands <- display
+  - interval: 50ms
+    then:
+      - lambda: |-
+          while (id(uart_panel).available()) {
+            uint8_t c;
+            if (!id(uart_panel).read_byte(&c)) break;
+
+            if (c != '\n' && c != '\r') {
+              if (id(rx_buf).length() < 200) id(rx_buf) += (char) c;
+              continue;
+            }
+            std::string msg = id(rx_buf);
+            id(rx_buf).clear();
+            if (msg.length() < 6 || msg[0] != 'C') continue;
+
+            size_t st = msg.rfind('*');
+            if (st == std::string::npos || st + 2 >= msg.length()) continue;
+            uint8_t x = 0;
+            for (size_t i = 0; i < st; i++) x ^= (uint8_t) msg[i];
+            char chk[4];
+            snprintf(chk, sizeof(chk), "%02X", x);
+            if (msg.compare(st + 1, 2, chk) != 0) {
+              ESP_LOGW("link", "bad checksum, message discarded: %s", msg.c_str());
+              continue;
+            }
+
+            auto field = [&](const char *k) -> std::string {
+              std::string key = std::string("|") + k + "=";
+              size_t p = msg.find(key);
+              if (p == std::string::npos) return std::string();
+              p += key.length();
+              size_t e = msg.find('|', p);
+              if (e == std::string::npos || e > st) e = st;
+              return msg.substr(p, e - p);
+            };
+
+            std::string n = field("n");
+            std::string cmd = field("c");
+            std::string val = field("v");
+            id(commands_received) += 1;
+            ESP_LOGI("link", "command n=%s c=%s v=%s", n.c_str(), cmd.c_str(), val.c_str());
+
+            bool ok = false;
+            std::string why;
+
+            // --- common rejection rules -------------------------------------
+            bool manual = id(selector_manual).state;
+            bool zero = !id(selector_auto).state && !id(selector_manual).state;
+
+            if (zero) {
+              why = "selector in ZERO";
+            } else if (id(in_backwash) && cmd != "back") {
+              why = "procedure in progress";
+            } else if (cmd == "pump") {
+              if (!manual) { why = "selector not in MANUAL"; }
+              else {
+                float hz = (val == "1") ? ${freq_normal_hz} : 0.0f;
+                auto call = id(vfd_setpoint).make_call();
+                call.set_value(hz);
+                call.perform();
+                if (val == "1") id(vfd_run).turn_on(); else id(vfd_run).turn_off();
+                ok = true;
+              }
+            } else if (cmd == "hz") {
+              float hz = atof(val.c_str());
+              if (hz < ${freq_min_hz} || hz > ${freq_max_hz}) { why = "frequency out of range"; }
+              else {
+                auto call = id(vfd_setpoint).make_call();
+                call.set_value(hz);
+                call.perform();
+                ok = true;
+              }
+            } else if (cmd.rfind("ev", 0) == 0) {
+              if (!manual) { why = "selector not in MANUAL"; }
+              else {
+                bool on = (val == "1");
+                if (cmd == "ev1") { on ? id(ev1).turn_on() : id(ev1).turn_off(); ok = true; }
+                else if (cmd == "ev2") { on ? id(ev2).turn_on() : id(ev2).turn_off(); ok = true; }
+                else if (cmd == "ev3") { on ? id(ev3).turn_on() : id(ev3).turn_off(); ok = true; }
+                else if (cmd == "ev4") { on ? id(ev4).turn_on() : id(ev4).turn_off(); ok = true; }
+                else why = "unknown valve";
+              }
+            } else if (cmd == "filt") {
+              if (!manual) { why = "selector not in MANUAL"; }
+              else { (val == "1") ? id(filtration_relay).turn_on() : id(filtration_relay).turn_off(); ok = true; }
+            } else if (cmd == "dosa" || cmd == "dosc" || cmd == "dosr") {
+              int sec = atoi(val.c_str());
+              if (!manual) { why = "selector not in MANUAL"; }
+              else if (sec < 1 || sec > 60) { why = "duration out of range"; }
+              else if (cmd == "dosa" && !id(tank1_float).state) { why = "acid tank empty"; }
+              else if (cmd == "dosc" && !id(tank2_float).state) { why = "chlorine tank empty"; }
+              else if (cmd == "dosr" && !id(tank3_float).state) { why = "reserve tank empty"; }
+              else {
+                if (cmd == "dosa") id(jog_acid)->execute(sec);
+                else if (cmd == "dosc") id(jog_chlorine)->execute(sec);
+                else id(jog_reserve)->execute(sec);
+                ok = true;
+              }
+            } else if (cmd == "back") {
+              if (!manual) { why = "selector not in MANUAL"; }
+              else if (val == "1") { id(backwash)->execute(); ok = true; }
+              else { id(backwash)->stop(); id(in_backwash) = false; ok = true; }
+            } else if (cmd == "ackal") {
+              id(active_alarms) = 0;
+              ok = true;
+            } else {
+              why = "unknown command";
+            }
+
+            if (!ok) id(commands_refused) += 1;
+
+            char body[160];
+            if (ok) snprintf(body, sizeof(body), "A|n=%s|r=ok|", n.c_str());
+            else    snprintf(body, sizeof(body), "A|n=%s|r=err|w=%s|", n.c_str(), why.c_str());
+            uint8_t xa = 0;
+            for (const char *p = body; *p; p++) xa ^= (uint8_t) *p;
+            char out[180];
+            snprintf(out, sizeof(out), "%s*%02X\n", body, xa);
+            id(uart_panel).write_str(out);
+          }
+
+sensor:
+  - platform: template
+    name: "Commands received from panel"
+    id: n_commands
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return id(commands_received);'
+
+  - platform: template
+    name: "Commands refused"
+    accuracy_decimals: 0
+    update_interval: 60s
+    lambda: 'return id(commands_refused);'

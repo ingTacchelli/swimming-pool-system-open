@@ -1,0 +1,464 @@
+# =============================================================================
+# SPB - control board: I2C bus, expander, sensor acquisition
+#
+# I2C addresses:
+#   0x20  MCP23017   8 dry-contact inputs on CN19/CN20 (4k7 pull-ups on the board)
+#   0x2F  MCP4018    digital potentiometer -> VFD speed reference (CN6)
+#   0x40  INA3221 #1 three 4-20 mA channels (P1)   - A0 to GND
+#   0x41  INA3221 #2 three 4-20 mA channels (P2)   - A0 to VS
+#   0x48  ADS1115    AIN0 pH, AIN1 ORP, AIN2 spare CN12, AIN3 pressure CN12
+#
+# The ADS1115 is powered at 5 V while the bus is 3.3 V: the required VIH is
+# 0.7 x VDD = 3.5 V, so the bus is slightly out of spec. If you see erratic
+# readings or NAKs on the bus, look here first.
+# =============================================================================
+
+i2c:
+  - id: bus_i2c
+    sda: GPIO8
+    scl: GPIO9
+    frequency: 100kHz    # conservative: short cable but a noisy inverter environment
+    scan: true
+
+mcp23017:
+  - id: mcp_panel
+    address: 0x20
+
+ads1115:
+  - id: ads_probes
+    address: 0x48
+
+one_wire:
+  - platform: gpio
+    pin: GPIO5
+    id: bus_1wire
+
+# -----------------------------------------------------------------------------
+# DS18B20 temperatures
+# Read the addresses from the log at first boot (ESPHome prints them) and write
+# them here: while commented out, ESPHome assigns the probes in the order it
+# finds them, which can change if you add one.
+# -----------------------------------------------------------------------------
+sensor:
+  - platform: dallas_temp
+    one_wire_id: bus_1wire
+    # address: 0x1234567890ABCDEF   # <-- fill in after the first boot
+    name: "Pool temperature"
+    id: pool_temperature
+    update_interval: 30s
+    filters:
+      - filter_out: nan
+      - median:
+          window_size: 5
+          send_every: 1
+
+  # -----------------------------------------------------------------------------
+  # Primary pH and ORP probes: BNC electrodes -> op-amp stages -> ADS1115
+  # The coefficients in control-logic.yaml are placeholders: derive them from a
+  # two-point calibration (front end: 0.47 V in -> 0 V out, -0.47 V in -> 2 V out).
+  # -----------------------------------------------------------------------------
+  - platform: ads1115
+    ads1115_id: ads_probes
+    multiplexer: 'A0_GND'
+    gain: 4.096
+    id: ph_volt
+    name: "pH - raw voltage"
+    update_interval: 2s
+    internal: true
+
+  - platform: ads1115
+    ads1115_id: ads_probes
+    multiplexer: 'A1_GND'
+    gain: 4.096
+    id: orp_volt
+    name: "ORP - raw voltage"
+    update_interval: 2s
+    internal: true
+
+  # --- CN12: two dual-range analog inputs --------------------------------------
+  # AIN3 = CN12 pin 1 -> filter pressure 0-10 V
+  # AIN2 = CN12 pin 2 -> spare, raw voltage only for now
+  - platform: ads1115
+    ads1115_id: ads_probes
+    multiplexer: 'A3_GND'
+    gain: 4.096
+    id: cn12_ch1_volt
+    name: "CN12 channel 1 - voltage"
+    update_interval: 5s
+    internal: true
+
+  - platform: ads1115
+    ads1115_id: ads_probes
+    multiplexer: 'A2_GND'
+    gain: 4.096
+    id: cn12_ch2_volt
+    name: "CN12 channel 2 - voltage"
+    update_interval: 5s
+    accuracy_decimals: 3
+    unit_of_measurement: "V"
+
+  - platform: template
+    name: "pH primary"
+    id: ph_primary
+    unit_of_measurement: "pH"
+    accuracy_decimals: 2
+    update_interval: 2s
+    lambda: |-
+      if (isnan(id(ph_volt).state)) return {};
+      // calibration line: pH = m * V + q   (m, q from a two-point calibration)
+      return id(cal_ph_slope) * id(ph_volt).state + id(cal_ph_offset);
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+
+  - platform: template
+    name: "ORP primary"
+    id: orp_primary
+    unit_of_measurement: "mV"
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: |-
+      if (isnan(id(orp_volt).state)) return {};
+      return id(cal_orp_slope) * id(orp_volt).state + id(cal_orp_offset);
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+
+  # Filter pressure: 0-10 V transmitter on CN12 pin 1, read on AIN3 through the
+  # on-board divider. Input voltage = V(AIN3) / ratio.
+  - platform: template
+    name: "Filter pressure"
+    id: filter_pressure
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float v = id(cn12_ch1_volt).state;
+      if (isnan(v)) return {};
+      float vin = v / ${cn12_ratio};
+      if (vin < -0.2f || vin > ${cn12_full_scale_v} * 1.1f) return {};
+      float bar = vin * ${pressure_full_scale_bar} / ${cn12_full_scale_v};
+      return bar < 0.0f ? 0.0f : bar;
+
+  # -----------------------------------------------------------------------------
+  # 4-20 mA channels on INA3221.
+  # The 5.6 ohm shunts give 112 mV at 20 mA against a 163.8 mV full scale,
+  # about 2800 counts.
+  # -----------------------------------------------------------------------------
+  - platform: ina3221
+    address: 0x40
+    i2c_id: bus_i2c
+    update_interval: 5s
+    channel_1:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina1_c1
+        name: "4-20mA ch1 - pH secondary"
+        internal: true
+    channel_2:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina1_c2
+        name: "4-20mA ch2 - ORP secondary"
+        internal: true
+    channel_3:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina1_c3
+        name: "4-20mA ch3 - reserve"
+        internal: true
+
+  - platform: ina3221
+    address: 0x41
+    i2c_id: bus_i2c
+    update_interval: 5s
+    channel_1:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina2_c1
+        name: "4-20mA ch4 - reserve"
+        internal: true
+    channel_2:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina2_c2
+        name: "4-20mA ch5 - reserve"
+        internal: true
+    channel_3:
+      shunt_resistance: ${shunt_4_20ma}
+      current:
+        id: ina2_c3
+        name: "4-20mA ch6 - reserve"
+        internal: true
+
+  # 4-20 mA -> physical quantity.
+  # open loop (< 3.6 mA) or overcurrent (> 21 mA) => invalid value
+  - platform: template
+    name: "pH secondary"
+    id: ph_secondary
+    unit_of_measurement: "pH"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float ma = id(ina1_c1).state * 1000.0f;
+      if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
+      return 0.0f + (ma - 4.0f) * (14.0f - 0.0f) / 16.0f;   // 0-14 pH scale
+
+  - platform: template
+    name: "ORP secondary"
+    id: orp_secondary
+    unit_of_measurement: "mV"
+    accuracy_decimals: 0
+    update_interval: 5s
+    lambda: |-
+      float ma = id(ina1_c2).state * 1000.0f;
+      if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
+      return -1000.0f + (ma - 4.0f) * (2000.0f) / 16.0f;    // -1000..+1000 mV scale
+
+  # -----------------------------------------------------------------------------
+  # Pulse flow meters, inputs on connector U29 (PC817B optocouplers + 475 ohm)
+  #   FLOW A = GPIO48 -> main circuit
+  #   FLOW B = GPIO47 -> measuring cell
+  # -----------------------------------------------------------------------------
+  - platform: pulse_counter
+    pin:
+      number: GPIO48
+      mode:
+        input: true
+    id: main_pulses
+    name: "Main circuit flow"
+    unit_of_measurement: "m³/h"
+    accuracy_decimals: 1
+    update_interval: 5s
+    internal_filter: 13us
+    filters:
+      - lambda: return x * 60.0 / ${k_factor_pulses_per_litre} / 1000.0;   # imp/min -> m3/h
+
+  - platform: pulse_counter
+    pin:
+      number: GPIO47
+      mode:
+        input: true
+    id: cell_pulses
+    name: "Measuring cell flow"
+    unit_of_measurement: "m³/h"
+    accuracy_decimals: 1
+    update_interval: 5s
+    internal_filter: 13us
+    filters:
+      - lambda: return x * 60.0 / ${k_factor_pulses_per_litre} / 1000.0;
+
+  # -----------------------------------------------------------------------------
+  # Tank level: three JSN-SR04T sensors sharing TRIG on GPIO4, with separate echo
+  # lines on GPIO41/40/39, each behind a 4k7 / 10k divider that brings 5 V down
+  # to 3.40 V. The sensors are read in sequence by the "measure_levels" script
+  # (see control-logic.yaml) so they never fire together: update_interval: never.
+  # -----------------------------------------------------------------------------
+  - platform: ultrasonic
+    id: tank1_distance
+    name: "Tank 1 distance"
+    trigger_pin:
+      number: GPIO4
+      allow_other_uses: true
+    echo_pin:
+      number: GPIO41
+      mode:
+        input: true
+    timeout: 2m
+    pulse_time: 10us
+    update_interval: never
+    internal: true
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+
+  - platform: ultrasonic
+    id: tank2_distance
+    name: "Tank 2 distance"
+    trigger_pin:
+      number: GPIO4
+      allow_other_uses: true
+    echo_pin:
+      number: GPIO40
+      mode:
+        input: true
+    timeout: 2m
+    pulse_time: 10us
+    update_interval: never
+    internal: true
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+
+  - platform: ultrasonic
+    id: tank3_distance
+    name: "Tank 3 distance"
+    trigger_pin:
+      number: GPIO4
+      allow_other_uses: true
+    echo_pin:
+      number: GPIO39
+      mode:
+        input: true
+    timeout: 2m
+    pulse_time: 10us
+    update_interval: never
+    internal: true
+    filters:
+      - median:
+          window_size: 5
+          send_every: 1
+
+  # Distance -> level %.  tank_empty_m = distance with the tank empty (sensor to
+  # bottom), tank_full_m = distance with the tank full. Outside the plausible
+  # range -> invalid.
+  - platform: template
+    name: "Acid level"
+    id: tank1_level
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      float d = id(tank1_distance).state;
+      if (isnan(d) || d < ${tank_full_m} * 0.5 || d > ${tank_empty_m} * 1.5) return {};
+      float p = 100.0f * (${tank_empty_m} - d) / (${tank_empty_m} - ${tank_full_m});
+      return p < 0 ? 0 : (p > 100 ? 100 : p);
+
+  - platform: template
+    name: "Chlorine level"
+    id: tank2_level
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      float d = id(tank2_distance).state;
+      if (isnan(d) || d < ${tank_full_m} * 0.5 || d > ${tank_empty_m} * 1.5) return {};
+      float p = 100.0f * (${tank_empty_m} - d) / (${tank_empty_m} - ${tank_full_m});
+      return p < 0 ? 0 : (p > 100 ? 100 : p);
+
+  - platform: template
+    name: "Reserve level"
+    id: tank3_level
+    unit_of_measurement: "%"
+    accuracy_decimals: 0
+    update_interval: 30s
+    lambda: |-
+      float d = id(tank3_distance).state;
+      if (isnan(d) || d < ${tank_full_m} * 0.5 || d > ${tank_empty_m} * 1.5) return {};
+      float p = 100.0f * (${tank_empty_m} - d) / (${tank_empty_m} - ${tank_full_m});
+      return p < 0 ? 0 : (p > 100 ? 100 : p);
+
+# -----------------------------------------------------------------------------
+# Digital inputs
+#
+#   IN4 (GPIO21) goes through a PC817 optocoupler, on connector U29 pin 1. Mind the polarity: the PC817 LED
+#   is powered by the board and turns OFF when the field contact closes to ground:
+#       contact CLOSED  -> LED off -> collector high -> GPIO HIGH
+#       contact OPEN    -> LED on  -> collector low  -> GPIO LOW
+#       cable unplugged -> same as open contact      -> GPIO LOW
+#   For the emergency chain this is the right polarity: "chain healthy" = closed
+#   contact = input high, and an unplugged cable reads as an open chain. No
+#   inversion is needed, and it fails safe.
+#
+#   The eight dry-contact inputs (floats, selector, buttons) are on the MCP23017
+#   GPA pins, with 4.7 kOhm pull-ups on the board: contact closed to ground =
+#   input low, so they need inverted: true.
+#
+#   INTA/INTB of the MCP23017 are ORed onto GPIO6, active low. ESPHome polls the
+#   expander and does not use the interrupt: the sensor below is only a
+#   diagnostic to see whether the line really moves.
+# -----------------------------------------------------------------------------
+binary_sensor:
+  - platform: gpio
+    name: "Emergency chain monitor"
+    id: emergency_chain
+    pin:
+      number: GPIO21
+      mode:
+        input: true
+    filters:
+      - delayed_on_off: 50ms
+
+  - platform: gpio
+    name: "Expander INT"
+    id: mcp_int
+    internal: true
+    pin:
+      number: GPIO6
+      mode:
+        input: true
+      inverted: true
+
+  - platform: gpio
+    name: "Acid minimum float"
+    id: tank1_float
+    pin:
+      mcp23xxx: mcp_panel
+      number: 0
+      mode:
+        input: true
+      inverted: true      # contact closed to ground = product present
+    filters:
+      - delayed_on_off: 500ms
+
+  - platform: gpio
+    name: "Chlorine minimum float"
+    id: tank2_float
+    pin:
+      mcp23xxx: mcp_panel
+      number: 1
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on_off: 500ms
+
+  - platform: gpio
+    name: "Reserve minimum float"
+    id: tank3_float
+    pin:
+      mcp23xxx: mcp_panel
+      number: 2
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on_off: 500ms
+
+  - platform: gpio
+    name: "Selector in AUTO"
+    id: selector_auto
+    pin:
+      mcp23xxx: mcp_panel
+      number: 3
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on_off: 100ms
+
+  - platform: gpio
+    name: "Selector in MANUAL"
+    id: selector_manual
+    pin:
+      mcp23xxx: mcp_panel
+      number: 4
+      mode:
+        input: true
+      inverted: true
+    filters:
+      - delayed_on_off: 100ms
+
+text_sensor:
+  - platform: template
+    name: "Selector mode"
+    id: selector_mode
+    update_interval: 1s
+    lambda: |-
+      if (id(selector_auto).state) return {"AUTO"};
+      if (id(selector_manual).state) return {"MANUAL"};
+      return {"ZERO"};

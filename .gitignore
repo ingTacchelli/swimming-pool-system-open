@@ -1,0 +1,11 @@
+# secrets and local build output
+secrets.yaml
+firmware/**/secrets.yaml
+.esphome/
+**/.esphome/
+__pycache__/
+*.pyc
+*.bak
+*.tmp
+.DS_Store
+Thumbs.db

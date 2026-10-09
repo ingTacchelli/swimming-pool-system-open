@@ -1,0 +1,78 @@
+# =============================================================================
+# SPB - control board: base (framework, network, services)
+# =============================================================================
+
+esphome:
+  name: ${device_name}
+  friendly_name: ${device_friendly_name}
+  comment: "SPB pool control board"
+  min_version: "2025.8.0"
+  on_boot:
+    priority: 600
+    then:
+      - logger.log: "SPB control: boot, outputs in safe state"
+      # explicit safe state at boot: every output off
+      - switch.turn_off: dosing_relay_acid
+      - switch.turn_off: dosing_relay_chlorine
+      - switch.turn_off: dosing_relay_reserve
+      - switch.turn_off: filtration_relay
+      - switch.turn_off: ev1
+      - switch.turn_off: ev2
+      - switch.turn_off: ev3
+      - switch.turn_off: ev4
+
+esp32:
+  board: esp32-s3-devkitc-1
+  variant: esp32s3
+  flash_size: 16MB
+  framework:
+    type: esp-idf
+
+psram:
+  mode: octal
+  speed: 80MHz
+
+logger:
+  level: INFO
+  # UART0 (GPIO43/44) stays free as a service serial console
+
+api:
+  encryption:
+    key: !secret api_key_control
+  reboot_timeout: 0s    # without Home Assistant the board must keep working
+
+ota:
+  - platform: esphome
+    password: !secret ota_password
+
+wifi:
+  ssid: !secret wifi_ssid
+  password: !secret wifi_password
+  # plant control is local: losing Wi-Fi must not stop anything
+  reboot_timeout: 0s
+  ap:
+    ssid: "SPB-Control-Fallback"
+    password: !secret ap_password
+
+captive_portal:
+
+web_server:
+  port: 80
+  version: 3
+  local: true
+
+sensor:
+  - platform: uptime
+    name: "Uptime"
+    id: uptime_s
+    update_interval: 60s
+  - platform: wifi_signal
+    name: "Wi-Fi RSSI"
+    update_interval: 60s
+
+text_sensor:
+  - platform: version
+    name: "ESPHome version"
+  - platform: wifi_info
+    ip_address:
+      name: "IP address"

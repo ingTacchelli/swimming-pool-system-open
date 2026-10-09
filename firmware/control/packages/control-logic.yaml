@@ -1,0 +1,286 @@
+# =============================================================================
+# SPB - control board: calibrations, dosing permissives, procedures
+# =============================================================================
+
+globals:
+  # --- probe calibration (line pH = m*V + q, same for ORP) -------------------
+  - id: cal_ph_slope
+    type: float
+    restore_value: true
+    initial_value: '-3.5'
+  - id: cal_ph_offset
+    type: float
+    restore_value: true
+    initial_value: '12.0'
+  - id: cal_orp_slope
+    type: float
+    restore_value: true
+    initial_value: '1000.0'
+  - id: cal_orp_offset
+    type: float
+    restore_value: true
+    initial_value: '0.0'
+  - id: cal_ph_valid
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+  - id: cal_orp_valid
+    type: bool
+    restore_value: true
+    initial_value: 'false'
+
+  # --- procedure state and alarms --------------------------------------------
+  - id: in_backwash
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: active_alarms
+    type: int
+    restore_value: false
+    initial_value: '0'
+  - id: refusal_reason
+    type: std::string
+    restore_value: false
+    initial_value: '""'
+
+  # --- dosing counters (seconds accumulated during the day) ------------------
+  - id: dose_s_acid
+    type: int
+    restore_value: true
+    initial_value: '0'
+  - id: dose_s_chlorine
+    type: int
+    restore_value: true
+    initial_value: '0'
+
+# -----------------------------------------------------------------------------
+# Sequential reading of the three ultrasonic sensors: TRIG is shared, so they
+# must never be polled together. One every 300 ms, the round repeats every 30 s.
+# -----------------------------------------------------------------------------
+script:
+  - id: measure_levels
+    mode: single
+    then:
+      - component.update: tank1_distance
+      - delay: 300ms
+      - component.update: tank2_distance
+      - delay: 300ms
+      - component.update: tank3_distance
+
+  # --- backwash: guided sequence ---------------------------------------------
+  - id: backwash
+    mode: single
+    then:
+      - lambda: 'id(in_backwash) = true;'
+      - logger.log: "Backwash: start"
+      # 1. stop the pump and suspend dosing
+      - script.execute: go_to_safe_state
+      - number.set:
+          id: vfd_setpoint
+          value: 0
+      - delay: 10s
+      # 2. (the multiport valve is manual on this plant: only a timed wait)
+      - delay: ${backwash_wash_s}s
+      # 3. rinse
+      - delay: ${backwash_rinse_s}s
+      # 4. back to filtration
+      - number.set:
+          id: vfd_setpoint
+          value: ${freq_normal_hz}
+      - lambda: 'id(in_backwash) = false;'
+      - logger.log: "Backwash: done"
+
+interval:
+  - interval: 30s
+    then:
+      - script.execute: measure_levels
+
+  # dosing seconds counter, used for the autonomy estimate
+  - interval: 1s
+    then:
+      - lambda: |-
+          if (id(dosing_relay_acid).state) id(dose_s_acid) += 1;
+          if (id(dosing_relay_chlorine).state) id(dose_s_chlorine) += 1;
+
+# system clock + counters reset at midnight
+time:
+  - platform: sntp
+    id: ora_locale
+    timezone: Europe/Rome
+    on_time:
+      - seconds: 0
+        minutes: 0
+        hours: 0
+        then:
+          - lambda: |-
+              id(dose_s_acid) = 0;
+              id(dose_s_chlorine) = 0;
+
+# -----------------------------------------------------------------------------
+# The 13 dosing permissives. They are exposed one by one so the panel can say
+# WHICH one is missing instead of just "dosing stopped".
+# -----------------------------------------------------------------------------
+binary_sensor:
+  - platform: template
+    name: "C01 filtration pump running"
+    id: c01_pump
+    lambda: 'return id(pump_running).state;'
+
+  - platform: template
+    name: "C02 main circuit flow"
+    id: c02_main_flow
+    lambda: |-
+      if (isnan(id(main_pulses).state)) return false;
+      return id(main_pulses).state >= ${flow_min_main};
+
+  - platform: template
+    name: "C03 measuring cell flow"
+    id: c03_cell_flow
+    lambda: |-
+      if (isnan(id(cell_pulses).state)) return false;
+      return id(cell_pulses).state >= ${flow_min_cell};
+
+  - platform: template
+    name: "C04 valid pH reading"
+    id: c04_ph_valid
+    lambda: |-
+      if (isnan(id(ph_primary).state)) return false;
+      return id(ph_primary).state > 0.0f && id(ph_primary).state < 14.0f;
+
+  - platform: template
+    name: "C05 valid ORP reading"
+    id: c05_orp_valid
+    lambda: |-
+      if (isnan(id(orp_primary).state)) return false;
+      return id(orp_primary).state > -1000.0f && id(orp_primary).state < 1500.0f;
+
+  - platform: template
+    name: "C06 pH probes agree"
+    id: c06_ph_agree
+    lambda: |-
+      if (isnan(id(ph_primary).state) || isnan(id(ph_secondary).state)) return false;
+      return fabs(id(ph_primary).state - id(ph_secondary).state) <= ${ph_disagreement_threshold};
+
+  - platform: template
+    name: "C07 ORP probes agree"
+    id: c07_orp_agree
+    lambda: |-
+      if (isnan(id(orp_primary).state) || isnan(id(orp_secondary).state)) return false;
+      return fabs(id(orp_primary).state - id(orp_secondary).state) <= ${orp_disagreement_threshold};
+
+  - platform: template
+    name: "C08 valid pH calibration"
+    id: c08_ph_cal
+    lambda: 'return id(cal_ph_valid);'
+
+  - platform: template
+    name: "C09 valid ORP calibration"
+    id: c09_orp_cal
+    lambda: 'return id(cal_orp_valid);'
+
+  - platform: template
+    name: "C10 sufficient product level"
+    id: c10_levels
+    lambda: 'return id(tank1_float).state && id(tank2_float).state;'
+
+  - platform: template
+    name: "C11 no blocking alarm"
+    id: c11_no_alarms
+    lambda: 'return id(active_alarms) == 0;'
+
+  - platform: template
+    name: "C12 not in backwash"
+    id: c12_not_backwashing
+    lambda: 'return !id(in_backwash);'
+
+  - platform: template
+    name: "C13 selector in AUTO"
+    id: c13_selector_auto
+    lambda: 'return id(selector_auto).state;'
+
+  - platform: template
+    name: "Dosing enabled"
+    id: dosing_enabled
+    lambda: |-
+      return id(c01_pump).state && id(c02_main_flow).state &&
+             id(c03_cell_flow).state && id(c04_ph_valid).state &&
+             id(c05_orp_valid).state && id(c06_ph_agree).state &&
+             id(c07_orp_agree).state && id(c08_ph_cal).state &&
+             id(c09_orp_cal).state && id(c10_levels).state &&
+             id(c11_no_alarms).state && id(c12_not_backwashing).state &&
+             id(c13_selector_auto).state;
+
+sensor:
+  - platform: template
+    name: "Permissives satisfied"
+    id: permissives_ok
+    accuracy_decimals: 0
+    update_interval: 2s
+    lambda: |-
+      int n = 0;
+      if (id(c01_pump).state) n++;
+      if (id(c02_main_flow).state) n++;
+      if (id(c03_cell_flow).state) n++;
+      if (id(c04_ph_valid).state) n++;
+      if (id(c05_orp_valid).state) n++;
+      if (id(c06_ph_agree).state) n++;
+      if (id(c07_orp_agree).state) n++;
+      if (id(c08_ph_cal).state) n++;
+      if (id(c09_orp_cal).state) n++;
+      if (id(c10_levels).state) n++;
+      if (id(c11_no_alarms).state) n++;
+      if (id(c12_not_backwashing).state) n++;
+      if (id(c13_selector_auto).state) n++;
+      return n;
+
+  # Estimated autonomy: how many days of product remain at today's average use.
+  # dosing_pump_litres_per_s is the dosing pump flow, to be measured once.
+  - platform: template
+    name: "Acid autonomy"
+    id: acid_autonomy
+    unit_of_measurement: "days"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      if (isnan(id(tank1_level).state) || id(dose_s_acid) < 10) return {};
+      float litri_residui = id(tank1_level).state / 100.0f * ${tank_litres};
+      float litri_al_giorno = id(dose_s_acid) * ${dosing_pump_litres_per_s};
+      if (litri_al_giorno <= 0.0f) return {};
+      return litri_residui / litri_al_giorno;
+
+  - platform: template
+    name: "Chlorine autonomy"
+    id: chlorine_autonomy
+    unit_of_measurement: "days"
+    accuracy_decimals: 1
+    update_interval: 60s
+    lambda: |-
+      if (isnan(id(tank2_level).state) || id(dose_s_chlorine) < 10) return {};
+      float litri_residui = id(tank2_level).state / 100.0f * ${tank_litres};
+      float litri_al_giorno = id(dose_s_chlorine) * ${dosing_pump_litres_per_s};
+      if (litri_al_giorno <= 0.0f) return {};
+      return litri_residui / litri_al_giorno;
+
+text_sensor:
+  - platform: template
+    name: "Missing permissives"
+    id: missing_permissives
+    update_interval: 2s
+    lambda: |-
+      std::string s;
+      if (!id(c01_pump).state) s += "pump stopped, ";
+      if (!id(c02_main_flow).state) s += "no main flow, ";
+      if (!id(c03_cell_flow).state) s += "no cell flow, ";
+      if (!id(c04_ph_valid).state) s += "pH not valid, ";
+      if (!id(c05_orp_valid).state) s += "ORP not valid, ";
+      if (!id(c06_ph_agree).state) s += "pH probes disagree, ";
+      if (!id(c07_orp_agree).state) s += "ORP probes disagree, ";
+      if (!id(c08_ph_cal).state) s += "pH calibration expired, ";
+      if (!id(c09_orp_cal).state) s += "ORP calibration expired, ";
+      if (!id(c10_levels).state) s += "product level too low, ";
+      if (!id(c11_no_alarms).state) s += "alarm active, ";
+      if (!id(c12_not_backwashing).state) s += "backwash in progress, ";
+      if (!id(c13_selector_auto).state) s += "selector not in AUTO, ";
+      if (s.empty()) return {"none"};
+      s.erase(s.size() - 2);
+      return {s};
