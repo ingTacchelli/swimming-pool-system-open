@@ -9,7 +9,7 @@
 # requires it to be configured. The 7B carries a CH32V003, so the panel is
 # described pin by pin, with timings verified on the real board.
 #
-# Seven pages with a navigation bar on the left. The UART protocol was tested
+# Eight pages with a navigation bar on the left. The UART protocol was tested
 # in both directions with the simulator in firmware/simulator.
 #
 # GPIO MAP
@@ -34,11 +34,21 @@ substitutions:
   device_name: "spb-display"
   device_friendly_name: "SPB Pool Panel"
 
+  # Trend charts: one sample every trend_interval_s seconds, trend_points samples
+  # per chart. 30 s x 240 = the last 2 hours. For a demo or a video, 2 s x 240
+  # fills the chart in a few minutes.
+  trend_interval_s: "30"
+  trend_points: "240"
+
 esphome:
   name: ${device_name}
   friendly_name: ${device_friendly_name}
   comment: "SPB pool touch panel"
   min_version: "2025.8.0"
+  # The LVGL chart widget is not part of the ESPHome LVGL schema: enable it in the
+  # LVGL build and draw the charts from lambdas (see the trend sampler below).
+  build_flags:
+    - -DLV_USE_CHART=1
 
 esp32:
   board: esp32-s3-devkitc-1
@@ -435,9 +445,9 @@ script:
       idx: int
     then:
       - lambda: |-
-          lv_obj_t *b[7] = { id(nav0), id(nav1), id(nav2), id(nav3),
-                             id(nav4), id(nav5), id(nav6) };
-          for (int i = 0; i < 7; i++) {
+          lv_obj_t *b[8] = { id(nav0), id(nav1), id(nav2), id(nav3),
+                             id(nav4), id(nav5), id(nav6), id(nav7) };
+          for (int i = 0; i < 8; i++) {
             lv_obj_set_style_bg_color(b[i],
               lv_color_hex(i == idx ? 0x2C3846 : 0x141A21), LV_PART_MAIN);
           }
@@ -619,12 +629,12 @@ script:
           }
 
 # =============================================================================
-# LVGL USER INTERFACE - seven pages
+# LVGL USER INTERFACE - eight pages
 #
 # The navigation bar, the header and the status bar are in the top_layer: a
-# single layer drawn above all the pages, so they exist once instead of seven
+# single layer drawn above all the pages, so they exist once instead of eight
 # times. The layer itself is transparent and does not intercept touch; only its
-# children do, i.e. the left column and the seven buttons. If the touch ever
+# children do, i.e. the left column and the eight buttons. If the touch ever
 # stops responding on the pages, this is the first place to look.
 #
 # Geometry: column 0..190, content 214..1000, header y 18, status bar y 566.
@@ -710,9 +720,9 @@ lvgl:
                 id: nav0
                 styles: st_nav
                 x: 8
-                y: 76
+                y: 72
                 width: 174
-                height: 68
+                height: 58
                 bg_color: 0x2C3846
                 pressed:
                   bg_color: 0x4A5B70
@@ -733,9 +743,9 @@ lvgl:
                 id: nav1
                 styles: st_nav
                 x: 8
-                y: 150
+                y: 135
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -755,9 +765,9 @@ lvgl:
                 id: nav2
                 styles: st_nav
                 x: 8
-                y: 224
+                y: 198
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -777,9 +787,9 @@ lvgl:
                 id: nav3
                 styles: st_nav
                 x: 8
-                y: 298
+                y: 261
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -799,9 +809,9 @@ lvgl:
                 id: nav4
                 styles: st_nav
                 x: 8
-                y: 372
+                y: 324
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -821,9 +831,9 @@ lvgl:
                 id: nav5
                 styles: st_nav
                 x: 8
-                y: 446
+                y: 387
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -843,9 +853,9 @@ lvgl:
                 id: nav6
                 styles: st_nav
                 x: 8
-                y: 520
+                y: 450
                 width: 174
-                height: 68
+                height: 58
                 pressed:
                   bg_color: 0x4A5B70
                 widgets:
@@ -860,6 +870,28 @@ lvgl:
                   - script.execute:
                       id: select_page
                       idx: 6
+
+            - button:
+                id: nav7
+                styles: st_nav
+                x: 8
+                y: 513
+                width: 174
+                height: 58
+                pressed:
+                  bg_color: 0x4A5B70
+                widgets:
+                  - label:
+                      align: CENTER
+                      text: "Trends"
+                      text_color: 0xFFFFFF
+                      text_font: f_text
+                on_click:
+                  - lvgl.page.show:
+                      id: page_trends
+                  - script.execute:
+                      id: select_page
+                      idx: 7
 
       # ---- common header ------------------------------------------------
       - label:
@@ -2442,11 +2474,74 @@ lvgl:
                   y: 60
                   text: "--"
 
+    # =======================================================================
+    # 8 - TRENDS: pH / ORP and temperature / flow over time
+    # The charts themselves are created and fed by the sampler in the interval
+    # block at the end of the file; these containers only give them a place.
+    # =======================================================================
+    - id: page_trends
+      bg_color: 0x0E1116
+      widgets:
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 56
+            width: 786
+            height: 240
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "pH (left, cyan, 6 to 9)   -   ORP mV (right, amber, 400 to 900)"
+              - label:
+                  id: lbl_t_span1
+                  styles: st_label
+                  x: 560
+                  width: 198
+                  text_align: RIGHT
+                  text: ""
+              - obj:
+                  id: trend_box_1
+                  x: 0
+                  y: 30
+                  width: 758
+                  height: 176
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+
+        - obj:
+            styles: st_panel
+            x: 214
+            y: 308
+            width: 786
+            height: 240
+            widgets:
+              - label:
+                  styles: st_label
+                  text: "Pool temperature C (left, cyan, 10 to 40)   -   main flow m3/h (right, amber, 0 to 30)"
+              - label:
+                  id: lbl_t_span2
+                  styles: st_label
+                  x: 560
+                  width: 198
+                  text_align: RIGHT
+                  text: ""
+              - obj:
+                  id: trend_box_2
+                  x: 0
+                  y: 30
+                  width: 758
+                  height: 176
+                  bg_opa: TRANSP
+                  border_width: 0
+                  pad_all: 0
+
 # =============================================================================
 # TIMINGS
 #   50ms   UART reception
 #   500ms  link watchdog and unanswered commands
 #   1s     text refresh
+#   trend_interval_s  one sample for each of the four trend series
 # =============================================================================
 # =============================================================================
 
@@ -2560,6 +2655,62 @@ interval:
 # =============================================================================
 # DIAGNOSTICS TOWARDS HOME ASSISTANT
 # =============================================================================
+
+  # ------------------------------------------------------------- trend sampler
+  # Creates the four chart series once, then pushes one sample per interval.
+  # Values are scaled to integers (pH x 100, flow x 10) because LVGL charts hold
+  # int32. A stale link pushes "no value", which draws a gap.
+  - interval: ${trend_interval_s}s
+    then:
+      - lambda: |-
+          static lv_obj_t *c1 = nullptr, *c2 = nullptr;
+          static lv_chart_series_t *s_ph = nullptr, *s_orp = nullptr;
+          static lv_chart_series_t *s_tmp = nullptr, *s_flw = nullptr;
+          const int N = ${trend_points};
+
+          if (c1 == nullptr) {
+            auto mk = [&](lv_obj_t *parent, lv_chart_series_t **sa, lv_chart_series_t **sb,
+                          int a_min, int a_max, int b_min, int b_max) -> lv_obj_t * {
+              lv_obj_t *c = lv_chart_create(parent);
+              lv_obj_set_size(c, lv_pct(100), lv_pct(100));
+              lv_obj_set_pos(c, 0, 0);
+              lv_obj_remove_flag(c, LV_OBJ_FLAG_CLICKABLE);
+              lv_chart_set_type(c, LV_CHART_TYPE_LINE);
+              lv_chart_set_point_count(c, N);
+              lv_chart_set_div_line_count(c, 5, 7);
+              lv_chart_set_axis_range(c, LV_CHART_AXIS_PRIMARY_Y, a_min, a_max);
+              lv_chart_set_axis_range(c, LV_CHART_AXIS_SECONDARY_Y, b_min, b_max);
+              lv_obj_set_style_bg_opa(c, LV_OPA_TRANSP, LV_PART_MAIN);
+              lv_obj_set_style_border_width(c, 0, LV_PART_MAIN);
+              lv_obj_set_style_pad_all(c, 0, LV_PART_MAIN);
+              lv_obj_set_style_line_color(c, lv_color_hex(0x2C3846), LV_PART_MAIN);
+              lv_obj_set_style_line_width(c, 3, LV_PART_ITEMS);
+              lv_obj_set_style_size(c, 0, 0, LV_PART_INDICATOR);
+              *sa = lv_chart_add_series(c, lv_color_hex(0x4EC8E6), LV_CHART_AXIS_PRIMARY_Y);
+              *sb = lv_chart_add_series(c, lv_color_hex(0xF2A93B), LV_CHART_AXIS_SECONDARY_Y);
+              lv_chart_set_all_values(c, *sa, LV_CHART_POINT_NONE);
+              lv_chart_set_all_values(c, *sb, LV_CHART_POINT_NONE);
+              return c;
+            };
+            c1 = mk(id(trend_box_1), &s_ph, &s_orp, 600, 900, 400, 900);
+            c2 = mk(id(trend_box_2), &s_tmp, &s_flw, 100, 400, 0, 300);
+
+            int total = N * ${trend_interval_s};
+            char span[32];
+            if (total >= 3600) snprintf(span, sizeof(span), "last %.1f h", total / 3600.0f);
+            else snprintf(span, sizeof(span), "last %d min", total / 60);
+            lv_label_set_text(id(lbl_t_span1), span);
+            lv_label_set_text(id(lbl_t_span2), span);
+          }
+
+          auto sc = [](float v, float k) -> int32_t {
+            return isnan(v) ? (int32_t) LV_CHART_POINT_NONE : (int32_t) lroundf(v * k);
+          };
+          const bool ok = !id(g_stale);
+          lv_chart_set_next_value(c1, s_ph,  ok ? sc(id(g_ph), 100.0f) : (int32_t) LV_CHART_POINT_NONE);
+          lv_chart_set_next_value(c1, s_orp, ok ? sc(id(g_or), 1.0f)   : (int32_t) LV_CHART_POINT_NONE);
+          lv_chart_set_next_value(c2, s_tmp, ok ? sc(id(g_tv), 10.0f)  : (int32_t) LV_CHART_POINT_NONE);
+          lv_chart_set_next_value(c2, s_flw, ok ? sc(id(g_q1), 10.0f)  : (int32_t) LV_CHART_POINT_NONE);
 
 sensor:
   - platform: uptime

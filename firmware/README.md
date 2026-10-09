@@ -26,7 +26,7 @@ control/
     control-logic.yaml           calibrations, 13 dosing permissives, backwash, autonomy
     control-link-display.yaml     UART protocol, control-board side
 display/
-  spb-display.yaml              <- single file: panel, touch, UART link, LVGL (7 pages)
+  spb-display.yaml              <- single file: panel, touch, UART link, LVGL (8 pages)
 simulator/
   spb_simulator.py              simulates the control board over a USB-serial adapter
 secrets.yaml.example            <- copy to secrets.yaml and fill in
@@ -66,6 +66,21 @@ Also: the DS18B20 addresses must be read from the first-boot log and written in
 from a two-point calibration with buffer solutions. The full list of checks is
 in the [bring-up checklist](../docs/bring-up.md).
 
+## Simulator and demo
+
+`simulator/spb_simulator.py` plays the control board over a USB-serial adapter
+(wiring in the file header). For a demo or a video use the slow, realistic
+curves:
+
+```
+python spb_simulator.py COM7 --demo --speed 90
+```
+
+and in `spb-display.yaml` set `trend_interval_s: "2"`. One real second is then 90
+simulated seconds, so the Trends charts show about 12 simulated hours in 8
+minutes: pH drifts up and is pulled back, ORP follows, the water warms and
+cools. Without `--demo` the simulator sends fast test waves.
+
 ## Safety measures built in
 
 - Outputs start **off**, and an explicit `go_to_safe_state` script exists. The
@@ -99,9 +114,15 @@ in the [bring-up checklist](../docs/bring-up.md).
 - The CH32V003 expander uses an external component
   (`github.com/fuzzybear62/esphome-waveshare_io_ch32v003`), pinned to a commit:
   adjustable backlight and panel/touch reset.
-- Seven LVGL pages: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
-  Commands. The navigation column, the header and the status bar live in
-  the `top_layer`, so they exist once instead of seven times. If the touch ever
+- Eight LVGL pages: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
+  Commands, Trends. The navigation column, the header and the status bar live in
+  the `top_layer`, so they exist once instead of eight times. If the touch ever
   stops responding on the pages, that is the first place to look.
+- **Trends page.** Two charts: pH and ORP, and pool temperature and main flow.
+  ESPHome has no chart widget, so the charts are LVGL charts created from code
+  (`-DLV_USE_CHART=1` in `spb-display.yaml`). One sample per `trend_interval_s`
+  seconds (default 30), `trend_points` samples per chart (default 240, that is
+  the last 2 hours); a lost link draws a gap. The history lives in RAM and is
+  lost at reset.
 - Only the visible page is updated, and every label is rewritten only if its text
   really changed.

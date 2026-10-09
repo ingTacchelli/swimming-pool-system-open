@@ -47,7 +47,7 @@ nome, "PSI Pool System Integrated, Acquisition Card Rev 0.A": è questa Rev A.
 | **Misura** | pH e ORP (due sonde ciascuno per il controllo incrociato), pressione, temperatura (DS18B20), portata (2 contatori a impulsi), livello fusti (ultrasuoni + galleggianti), 6 anelli 4-20 mA industriali, 16 contatti puliti |
 | **Comanda** | 4 relè (3 pompe dosatrici + filtrazione), 4 elettrovalvole, un collegamento RS-485 Modbus verso un inverter Toshiba VF-S15 |
 | **Decide** | ESP32-S3 con ESPHome: 13 consensi al dosaggio, dosaggio manuale a impulsi con durata massima, sequenza di controlavaggio, stato sicuro all'accensione |
-| **Mostra** | pannello touch Waveshare ESP32-S3 da 7", 7 pagine, collegato con un cavo seriale a 3 fili |
+| **Mostra** | pannello touch Waveshare ESP32-S3 da 7", 8 pagine, collegato con un cavo seriale a 3 fili |
 | **Comunica** | API nativa ESPHome (Home Assistant facoltativo) |
 
 Scheda tecnica: [docs/datasheet.it.md](docs/datasheet.it.md) · [cablaggio (bozza)](docs/wiring.it.md) · [casi d'uso](docs/use-cases.it.md)

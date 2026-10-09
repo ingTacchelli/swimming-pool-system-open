@@ -35,6 +35,15 @@
 #   pip install pyserial
 #   python spb_simulator.py             (lists the ports and lets you choose)
 #   python spb_simulator.py COM7        (goes straight to that port)
+#   python spb_simulator.py COM7 --demo --speed 90
+#
+#   --demo   slow, realistic curves instead of the fast test waves: pH drifts up
+#            and is pulled back by an acid dose, ORP follows the chlorine dose,
+#            the water warms and cools over a day, the flow is steady.
+#   --speed  how much faster than real time the demo runs (default 1). With
+#            --speed 90 one real second is 90 simulated seconds, so a chart of
+#            240 samples taken every 2 s (trend_interval_s in spb-display.yaml)
+#            shows about 12 simulated hours in 8 minutes: good for a video.
 #
 #   Then press 'h' for the keyboard commands.
 # ===========================================================================
@@ -98,7 +107,9 @@ def campo(msg: str, key: str):
 # Simulated plant state
 # --------------------------------------------------------------------------
 class Plant:
-    def __init__(self):
+    def __init__(self, demo=False, speed=1.0):
+        self.demo = demo
+        self.speed = speed
         self.t0 = time.time()
         self.mode = "A"            # A = AUTO, M = MANUAL, 0 = ZERO
         self.pump = True
@@ -120,18 +131,33 @@ class Plant:
 
     def status_body(self) -> str:
         t = self.t()
-        ph = 7.2 + 0.35 * math.sin(t / 9.0)
-        ps = ph + 0.04 * math.sin(t / 3.0)
-        orp = 700.0 + 45.0 * math.sin(t / 13.0)
+        if self.demo:
+            s = t * self.speed                       # simulated seconds
+            cycle = (s % 2400.0) / 2400.0            # 40 simulated minutes
+            ph = 7.05 + 0.40 * cycle + 0.02 * math.sin(s / 170.0)
+            ps = ph + 0.03 * math.sin(s / 90.0)
+            orp = 690.0 - 35.0 * cycle + 18.0 * math.sin(s / 2300.0) + 4.0 * math.sin(s / 61.0)
+            tv = 26.0 + 2.0 * math.sin(2.0 * math.pi * s / 86400.0 - 1.2)
+            tc = tv - 0.6 + 0.1 * math.sin(s / 300.0)
+            hz = (42.0 + 0.3 * math.sin(s / 700.0) + self.hz_offset) if self.pump else 0.0
+            cu = (61.0 + 1.5 * math.sin(s / 500.0)) if self.pump else 0.0
+            q1 = (12.4 + 0.3 * math.sin(s / 400.0)) if self.pump else 0.0
+            q2 = (0.55 + 0.02 * math.sin(s / 250.0)) if self.pump else 0.0
+            l1 = 74.0 - (s / 3600.0) % 20.0
+            l2 = 61.0 - (s / 5400.0) % 15.0
+        else:
+            ph = 7.2 + 0.35 * math.sin(t / 9.0)
+            ps = ph + 0.04 * math.sin(t / 3.0)
+            orp = 700.0 + 45.0 * math.sin(t / 13.0)
+            tv = 26.5 + 1.2 * math.sin(t / 40.0)
+            tc = tv - 0.6 + 0.2 * math.sin(t / 11.0)      # cell, always a bit lower
+            hz = (42.0 + 1.5 * math.sin(t / 7.0) + self.hz_offset) if self.pump else 0.0
+            cu = (61.0 + 4.0 * math.sin(t / 5.0)) if self.pump else 0.0
+            q1 = (12.4 + 0.8 * math.sin(t / 6.0)) if self.pump else 0.0
+            q2 = (0.55 + 0.05 * math.sin(t / 4.0)) if self.pump else 0.0
+            l1 = 74.0 - (t / 30.0) % 20.0
+            l2 = 61.0 - (t / 45.0) % 15.0
         os_ = (orp - 12.0) if self.orp2_valid else -999.0
-        tv = 26.5 + 1.2 * math.sin(t / 40.0)
-        tc = tv - 0.6 + 0.2 * math.sin(t / 11.0)      # cell, always a bit lower
-        hz = (42.0 + 1.5 * math.sin(t / 7.0) + self.hz_offset) if self.pump else 0.0
-        cu = (61.0 + 4.0 * math.sin(t / 5.0)) if self.pump else 0.0
-        q1 = (12.4 + 0.8 * math.sin(t / 6.0)) if self.pump else 0.0
-        q2 = (0.55 + 0.05 * math.sin(t / 4.0)) if self.pump else 0.0
-        l1 = 74.0 - (t / 30.0) % 20.0
-        l2 = 61.0 - (t / 45.0) % 15.0
         l3 = 88.0
         f = 1 if self.tanks_full else 0
 
@@ -224,14 +250,25 @@ def choose_port():
 
 
 def main():
-    port = sys.argv[1] if len(sys.argv) > 1 else choose_port()
+    args = sys.argv[1:]
+    demo = "--demo" in args
+    speed = 1.0
+    if "--speed" in args:
+        try:
+            speed = float(args[args.index("--speed") + 1])
+        except (IndexError, ValueError):
+            print("--speed needs a number, for example --speed 90")
+            sys.exit(1)
+    pos = [a for i, a in enumerate(args)
+           if not a.startswith("--") and not (i > 0 and args[i - 1] == "--speed")]
+    port = pos[0] if pos else choose_port()
     try:
         ser = serial.Serial(port, BAUD, timeout=0)
     except Exception as e:
         print("Cannot open %s: %s" % (port, e))
         sys.exit(1)
 
-    plant = Plant()
+    plant = Plant(demo=demo, speed=speed)
     buf = ""
     next_s = 0.0
     n_sent = 0

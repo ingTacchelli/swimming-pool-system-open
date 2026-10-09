@@ -45,7 +45,7 @@ A two-layer board built around an ESP32-S3. The board prints its own name,
 | **Measures** | pH and ORP (two probes each for cross-checking), pressure, temperature (DS18B20), flow (2 pulse meters), tank levels (ultrasonic + float switches), 6 × 4-20 mA industrial loops, 16 dry contacts |
 | **Drives** | 4 relays (3 dosing pumps + filtration), 4 solenoid valves, an RS-485 Modbus link to a Toshiba VF-S15 inverter |
 | **Thinks** | ESP32-S3 running ESPHome: 13 dosing permissives, pulsed manual dosing with a hard time limit, backwash sequence, safe state at power-up |
-| **Shows** | Waveshare ESP32-S3 7" touch panel, 7 pages, linked by a 3-wire serial cable |
+| **Shows** | Waveshare ESP32-S3 7" touch panel, 8 pages, linked by a 3-wire serial cable |
 | **Talks** | ESPHome native API (Home Assistant optional) |
 
 Datasheet: [docs/datasheet.md](docs/datasheet.md) · [wiring (draft)](docs/wiring.md) · [use cases](docs/use-cases.md)

@@ -38,5 +38,10 @@ per la revisione successiva.
 - **Refresh del display.** Il componente del pannello usa un solo framebuffer,
   quindi una parte degli artefatti nel refresh è inevitabile per costruzione.
   Per eliminarli serve una copia locale del componente con doppio framebuffer.
+- **Lo storico di Trends è volatile.** I grafici della pagina Trends tengono i
+  campioni in RAM: un riavvio li svuota e nulla viene salvato o esportato. Sono
+  disegnati da codice, fuori dallo schema LVGL di ESPHome; dopo aver aperto la
+  pagina controlla il log di avvio per errori di allocazione (vedi
+  [bring-up.it.md](bring-up.it.md)).
 - **Solo inglese.** Nomi delle entità, etichette del pannello e motivi di
   rifiuto sono in inglese; non c'è selezione della lingua.

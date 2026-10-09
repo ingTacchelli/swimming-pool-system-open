@@ -26,7 +26,7 @@ control/
     control-logic.yaml           calibrazioni, 13 consensi al dosaggio, controlavaggio, autonomia
     control-link-display.yaml     protocollo UART, lato scheda di controllo
 display/
-  spb-display.yaml              <- file unico: pannello, touch, link UART, LVGL (7 pagine)
+  spb-display.yaml              <- file unico: pannello, touch, link UART, LVGL (8 pagine)
 simulator/
   spb_simulator.py              simula la scheda di controllo con un adattatore USB-seriale
 secrets.yaml.example            <- copiare in secrets.yaml e compilarlo
@@ -67,6 +67,22 @@ Inoltre: gli indirizzi dei DS18B20 vanno letti dal log del primo avvio e scritti
 una calibrazione a due punti con le soluzioni tampone. L'elenco completo dei
 controlli è nella [checklist di prima accensione](../docs/bring-up.it.md).
 
+## Simulatore e demo
+
+`simulator/spb_simulator.py` fa la parte della scheda di controllo tramite un
+adattatore USB-seriale (collegamenti nell'intestazione del file). Per una demo o
+un video usa le curve lente e realistiche:
+
+```
+python spb_simulator.py COM7 --demo --speed 90
+```
+
+e in `spb-display.yaml` imposta `trend_interval_s: "2"`. Un secondo reale
+corrisponde a 90 secondi simulati, quindi i grafici di Trends mostrano circa 12
+ore simulate in 8 minuti: il pH sale e viene riportato giù, l'ORP lo segue,
+l'acqua si scalda e si raffredda. Senza `--demo` il simulatore invia onde di
+prova veloci.
+
 ## Misure di sicurezza presenti
 
 - Le uscite partono **spente** e c'è uno script `go_to_safe_state` esplicito.
@@ -100,10 +116,16 @@ controlli è nella [checklist di prima accensione](../docs/bring-up.it.md).
 - L'espansore CH32V003 usa un componente esterno
   (`github.com/fuzzybear62/esphome-waveshare_io_ch32v003`), bloccato su un
   commit: retroilluminazione regolabile e reset del pannello e del touch.
-- Sette pagine LVGL: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
-  Commands. La colonna di navigazione, l'intestazione e la barra di stato
-  stanno nel `top_layer`, quindi esistono una volta sola invece di sette. Se un
+- Otto pagine LVGL: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
+  Commands, Trends. La colonna di navigazione, l'intestazione e la barra di stato
+  stanno nel `top_layer`, quindi esistono una volta sola invece di otto. Se un
   giorno il touch smettesse di rispondere sulle pagine, è il primo posto dove
   guardare.
+- **Pagina Trends.** Due grafici: pH e ORP, temperatura della vasca e portata
+  principale. ESPHome non ha un widget grafico, quindi sono grafici LVGL creati
+  da codice (`-DLV_USE_CHART=1` in `spb-display.yaml`). Un campione ogni
+  `trend_interval_s` secondi (default 30), `trend_points` campioni per grafico
+  (default 240, cioè le ultime 2 ore); se il collegamento cade, il grafico mostra
+  un'interruzione. Lo storico sta in RAM e si perde al riavvio.
 - Si aggiorna solo la pagina visibile, e ogni etichetta viene riscritta solo se il
   testo è cambiato davvero.

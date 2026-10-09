@@ -66,10 +66,14 @@ collegati**, in quest'ordine.
     `spb-display.yaml`; aggiorna il riferimento di proposito, non per caso.
 19. Per provare il protocollo prima che la scheda di controllo sia pronta, usa
     `firmware/simulator/spb_simulator.py`.
+20. Apri la pagina **Trends** e lasciala qualche minuto: i grafici devono
+    iniziare a disegnarsi e il log di avvio non deve segnalare errori di
+    allocazione. Con `--demo --speed 90` del simulatore e `trend_interval_s: "2"`
+    si riempiono in fretta.
 
 ## Prima di qualsiasi dosaggio
 
-20. Fai girare le pompe in manuale, a impulsi a tempo limitato, con acqua, e
+21. Fai girare le pompe in manuale, a impulsi a tempo limitato, con acqua, e
     verifica che ogni pompa parta dal connettore previsto.
-21. Verifica che la catena di emergenza hardware fermi tutto da sola,
+22. Verifica che la catena di emergenza hardware fermi tutto da sola,
     indipendentemente dal firmware.

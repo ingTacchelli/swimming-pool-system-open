@@ -63,10 +63,13 @@ this order.
     `spb-display.yaml`; update the pin on purpose, not by accident.
 19. To test the protocol before the control board is ready, use
     `firmware/simulator/spb_simulator.py`.
+20. Open the **Trends** page and leave it for a few minutes: the charts must start
+    drawing, and the boot log must not report an allocation failure. With the
+    simulator's `--demo --speed 90` and `trend_interval_s: "2"` they fill quickly.
 
 ## Before any dosing
 
-20. Run the pumps in manual, as time-limited pulses, with water, and verify that
+21. Run the pumps in manual, as time-limited pulses, with water, and verify that
     each pump starts from the intended connector.
-21. Verify that the hardware emergency chain stops everything on its own,
+22. Verify that the hardware emergency chain stops everything on its own,
     independently of the firmware.
