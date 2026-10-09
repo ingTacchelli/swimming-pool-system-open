@@ -1,0 +1,29 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 560" font-family="DejaVu Sans, Arial, sans-serif">
+<rect width="1000" height="560" fill="#ffffff"/>
+<text x="500" y="30" text-anchor="middle" font-size="18" font-weight="bold" fill="#10263a">Wiring overview (draft)</text>
+<rect x="380" y="170" width="240" height="180" rx="8" fill="#fff4d6" stroke="#c58a00" stroke-width="1.5"/><text x="500.0" y="254.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Control board</text><text x="500.0" y="274.0" text-anchor="middle" font-size="12" fill="#3b566e">Swimming Pool System Open</text>
+<rect x="30" y="50" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="130.0" y="72.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">pH / ORP probes</text><text x="130.0" y="92.0" text-anchor="middle" font-size="12" fill="#3b566e">BNC RF1, RF2</text>
+<line x1="230" y1="78" x2="380" y2="260" stroke="#2b6a99" stroke-width="2" />
+<rect x="30" y="126" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="130.0" y="148.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Pressure</text><text x="130.0" y="168.0" text-anchor="middle" font-size="12" fill="#3b566e">CN12, 0-10 V</text>
+<line x1="230" y1="154" x2="380" y2="260" stroke="#2b6a99" stroke-width="2" />
+<rect x="30" y="202" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="130.0" y="224.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Flow meters</text><text x="130.0" y="244.0" text-anchor="middle" font-size="12" fill="#3b566e">U29</text>
+<line x1="230" y1="230" x2="380" y2="260" stroke="#2b6a99" stroke-width="2" />
+<rect x="30" y="278" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="130.0" y="300.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Tank sensors</text><text x="130.0" y="320.0" text-anchor="middle" font-size="12" fill="#3b566e">ultrasonic, floats</text>
+<line x1="230" y1="306" x2="380" y2="260" stroke="#2b6a99" stroke-width="2" />
+<rect x="30" y="354" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="130.0" y="376.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Temperature</text><text x="130.0" y="396.0" text-anchor="middle" font-size="12" fill="#3b566e">DS18B20, 1-Wire</text>
+<line x1="230" y1="382" x2="380" y2="260" stroke="#2b6a99" stroke-width="2" />
+<rect x="770" y="60" width="200" height="56" rx="8" fill="#e9f6ec" stroke="#2e7d46" stroke-width="1.5"/><text x="870.0" y="82.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Dosing pumps</text><text x="870.0" y="102.0" text-anchor="middle" font-size="12" fill="#3b566e">CN18, CN7, CN8 (to confirm)</text>
+<line x1="620" y1="260" x2="770" y2="88" stroke="#2e7d46" stroke-width="2" />
+<rect x="770" y="144" width="200" height="56" rx="8" fill="#e9f6ec" stroke="#2e7d46" stroke-width="1.5"/><text x="870.0" y="166.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Filtration pump</text><text x="870.0" y="186.0" text-anchor="middle" font-size="12" fill="#3b566e">CN9</text>
+<line x1="620" y1="260" x2="770" y2="172" stroke="#2e7d46" stroke-width="2" />
+<rect x="770" y="228" width="200" height="56" rx="8" fill="#e9f6ec" stroke="#2e7d46" stroke-width="1.5"/><text x="870.0" y="250.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Solenoid valves</text><text x="870.0" y="270.0" text-anchor="middle" font-size="12" fill="#3b566e">CN10, EV1-EV4</text>
+<line x1="620" y1="260" x2="770" y2="256" stroke="#2e7d46" stroke-width="2" />
+<rect x="770" y="312" width="200" height="56" rx="8" fill="#e9f6ec" stroke="#2e7d46" stroke-width="1.5"/><text x="870.0" y="334.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Inverter VF-S15</text><text x="870.0" y="354.0" text-anchor="middle" font-size="12" fill="#3b566e">CN11, RS-485</text>
+<line x1="620" y1="260" x2="770" y2="340" stroke="#2e7d46" stroke-width="2" />
+<rect x="60" y="470" width="200" height="56" rx="8" fill="#fde9e7" stroke="#b3392b" stroke-width="1.5"/><text x="160.0" y="492.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">24 V DC supply</text><text x="160.0" y="512.0" text-anchor="middle" font-size="12" fill="#3b566e">CN2</text>
+<line x1="260" y1="498" x2="380" y2="350" stroke="#b3392b" stroke-width="2" />
+<rect x="400" y="440" width="200" height="56" rx="8" fill="#e8f1f8" stroke="#2b6a99" stroke-width="1.5"/><text x="500.0" y="462.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Touch panel 7"</text><text x="500.0" y="482.0" text-anchor="middle" font-size="12" fill="#3b566e">3-wire serial (TX, RX, GND)</text>
+<line x1="500" y1="440" x2="500" y2="350" stroke="#2b6a99" stroke-width="2" />
+<rect x="740" y="440" width="230" height="56" rx="8" fill="#fde9e7" stroke="#b3392b" stroke-width="1.5"/><text x="855.0" y="462.0" text-anchor="middle" font-size="15" font-weight="bold" fill="#10263a">Emergency chain</text><text x="855.0" y="482.0" text-anchor="middle" font-size="12" fill="#3b566e">hardware; monitored on U29</text>
+<line x1="740" y1="468" x2="620" y2="340" stroke="#b3392b" stroke-width="2" stroke-dasharray="6 5"/>
+<text x="500" y="548" text-anchor="middle" font-size="12" fill="#3b566e">The emergency chain cuts the loads in hardware, independently of the firmware. Mains wiring is done by the installer outside the board.</text></svg>

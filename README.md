@@ -48,6 +48,8 @@ A two-layer board built around an ESP32-S3. The board prints its own name,
 | **Shows** | Waveshare ESP32-S3 7" touch panel, 7 pages, linked by a 3-wire serial cable |
 | **Talks** | ESPHome native API (Home Assistant optional) |
 
+Datasheet: [docs/datasheet.md](docs/datasheet.md) · [wiring (draft)](docs/wiring.md) · [use cases](docs/use-cases.md)
+
 Full details: [pin map](docs/pin-map.md) · [inputs and outputs](docs/io-map.md) ·
 [panel link protocol](docs/uart-protocol.md) · [hardware files](hardware/README.md)
 
@@ -93,7 +95,8 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report things well.
 ## Assembly guide
 
 *Coming soon.* A step-by-step guide to populating the board, wiring the cabinet
-and commissioning it on a pool, with photos.
+and commissioning it on a pool, with photos. A first [wiring draft](docs/wiring.md)
+is already available.
 
 ## Where it could go: next revision
 

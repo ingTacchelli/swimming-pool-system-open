@@ -50,6 +50,8 @@ nome, "PSI Pool System Integrated, Acquisition Card Rev 0.A": è questa Rev A.
 | **Mostra** | pannello touch Waveshare ESP32-S3 da 7", 7 pagine, collegato con un cavo seriale a 3 fili |
 | **Comunica** | API nativa ESPHome (Home Assistant facoltativo) |
 
+Scheda tecnica: [docs/datasheet.it.md](docs/datasheet.it.md) · [cablaggio (bozza)](docs/wiring.it.md) · [casi d'uso](docs/use-cases.it.md)
+
 Dettagli: [mappa dei pin](docs/pin-map.it.md) · [ingressi e uscite](docs/io-map.it.md) ·
 [protocollo del pannello](docs/uart-protocol.it.md) · [file hardware](hardware/README.it.md)
 
@@ -96,7 +98,8 @@ Vedi [CONTRIBUTING.md](CONTRIBUTING.md) per segnalare bene i problemi.
 ## Guida al montaggio
 
 *Prossimamente.* Una guida passo passo per popolare la scheda, cablare il quadro
-e metterlo in servizio su una piscina, con foto.
+e metterlo in servizio su una piscina, con foto. Una prima [bozza del cablaggio](docs/wiring.it.md)
+è già disponibile.
 
 ## Dove potrebbe andare: prossima revisione
 
