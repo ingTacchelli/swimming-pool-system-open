@@ -8,16 +8,16 @@
 # ---------------------------------------------------------------------------
 # GPIO MAP
 #
-#   GPIO1   RS-485 TX (VFD)              GPIO17  relay CN7  "PH"
-#   GPIO2   RS-485 DE/RE                 GPIO18  relay CN8  "ACIDO"
+#   GPIO1   RS-485 TX (VFD)              GPIO17  relay, reserve dosing
+#   GPIO2   RS-485 DE/RE                 GPIO18  relay, acid dosing
 #   GPIO4   ultrasonic TRIG (common)     GPIO21  IN4 via optocoupler (conn. U29 pin 1)
 #   GPIO5   1-Wire bus (DS18B20)         GPIO39  ultrasonic ECHO 3 (IN3)
 #   GPIO6   MCP23017 INT (active low)    GPIO40  ultrasonic ECHO 2 (IN2)
-#   GPIO7   relay CN18 "DOSATRICE"       GPIO41  ultrasonic ECHO 1 (IN1)
+#   GPIO7   relay, chlorine dosing       GPIO41  ultrasonic ECHO 1 (IN1)
 #   GPIO8   I2C SDA                      GPIO42  RS-485 RX (VFD)
 #   GPIO9   I2C SCL                      GPIO47  FLOW B via optocoupler (U29 pin 2)
-#   GPIO10  relay CN9 "FILTRAGGIO"       GPIO48  FLOW A via optocoupler (U29 pin 3)
-#   GPIO11  EV4    GPIO12 EV3
+#   GPIO10  relay, filtration            GPIO48  FLOW A via optocoupler (U29 pin 3)
+#   GPIO11  EV4 (pool lighting)   GPIO12 EV3
 #   GPIO13  EV2    GPIO14 EV1            GPIO15/16  UART to the display panel
 #
 #   Free: GPIO3, 35, 36, 37, 38, 46
@@ -27,13 +27,15 @@
 #   be used. Check the module silkscreen before mounting it.
 #
 # ---------------------------------------------------------------------------
-# RELAY OUTPUT NAMING
+# RELAY OUTPUT NAMING - VERIFY BEFORE WIRING ANY DOSING PUMP
 #
-#   The schematic silkscreen and the firmware use different names for the three
-#   dosing pumps. The mapping used here is:
-#       CN8  "ACIDO"     -> dosing_relay_acid    (GPIO18)
-#       CN18 "DOSATRICE" -> dosing_relay_chlorine    (GPIO7)
-#       CN7  "PH"        -> dosing_relay_reserve  (GPIO17)
+#   The silkscreen labels next to the dosing relay connectors do not match the
+#   firmware naming (see docs/wiring.md). The mapping below has NOT been
+#   confirmed on hardware: check each relay output with a multimeter before
+#   connecting an acid or chlorine pump. The mapping used here is:
+#       GPIO18 (CN8 assumed)  -> dosing_relay_acid
+#       GPIO7  (CN18)         -> dosing_relay_chlorine
+#       GPIO17 (CN7 assumed)  -> dosing_relay_reserve
 #   If you wire the pumps differently, change only the pins in the switch
 #   block of packages/control-outputs.yaml: everything else uses the ids.
 # ---------------------------------------------------------------------------
@@ -43,6 +45,7 @@
 substitutions:
   device_name: "spb-control"
   device_friendly_name: "SPB Pool Control"
+  timezone: "Europe/Rome"          # IANA time zone of the installation
 
   # --- 4-20 mA acquisition --------------------------------------------------
   # Sense resistors on the INA3221 inputs (R229..R233 and siblings).
@@ -56,6 +59,12 @@ substitutions:
   cn12_full_scale_v: "10.0"      # input voltage at full scale
   cn12_ratio: "0.4005"         # volts on AIN3 per volt at the input
   pressure_full_scale_bar: "4.0"
+
+  # --- filter pressure (4-20 mA, INA3221 channels 1 and 2) --------------------
+  # Channel 1 = filter inlet (upstream), channel 2 = filter outlet (downstream).
+  # Channels 3 and 4 carry the secondary pH and ORP probes.
+  press_4_20_full_scale_bar: "4.0"   # bar at 20 mA: CONFIRM on the transmitter datasheet
+  dp_backwash_bar: "0.50"            # differential above which a backwash is advised
 
   # --- flow meters ------------------------------------------------------------
   k_factor_pulses_per_litre: "450"        # pulses per litre of your flow meter
@@ -89,4 +98,6 @@ packages:
   outputs:  !include packages/control-outputs.yaml
   vfd:      !include packages/control-vfd-modbus.yaml
   logic:    !include packages/control-logic.yaml
+  settings: !include packages/control-settings.yaml
+  schedule: !include packages/control-schedule.yaml
   display:  !include packages/control-link-display.yaml

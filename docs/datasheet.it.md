@@ -18,6 +18,7 @@ accensione.
 | Software | ESPHome (ESP-IDF); API nativa; Home Assistant facoltativo |
 | Interfaccia utente | Waveshare ESP32-S3-Touch-LCD-7B, 7", 1024 × 600, touch, collegamento seriale a 3 fili |
 | Revisione | Rev A (stampata sulla scheda come "Rev 0.A") |
+| Stato | proof of concept (prototipo funzionante) |
 
 ## Ingressi
 

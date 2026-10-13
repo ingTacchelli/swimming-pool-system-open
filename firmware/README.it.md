@@ -25,8 +25,10 @@ control/
     control-vfd-modbus.yaml       Toshiba VF-S15 su RS-485 Modbus RTU
     control-logic.yaml           calibrazioni, 13 consensi al dosaggio, controlavaggio, autonomia
     control-link-display.yaml     protocollo UART, lato scheda di controllo
+    control-settings.yaml         parametri salvati in flash (p_*), calibrazione pH/ORP a due punti
+    control-schedule.yaml         programmatore di filtrazione: programmi, modalità, fotovoltaico, shock
 display/
-  spb-display.yaml              <- file unico: pannello, touch, link UART, LVGL (8 pagine)
+  spb-display.yaml              <- file unico: pannello, touch, link UART, LVGL (16 pagine, italiano/inglese)
 simulator/
   spb_simulator.py              simula la scheda di controllo con un adattatore USB-seriale
 secrets.yaml.example            <- copiare in secrets.yaml e compilarlo
@@ -51,10 +53,14 @@ internet.
 
 Tutti i valori stanno in cima a `spb-control.yaml`, nel blocco `substitutions`:
 
+- `timezone` — fuso orario dell'installazione (anche in `spb-display.yaml`)
 - `shunt_4_20ma` — 5.6 ohm
 - `cn12_ratio`, `cn12_full_scale_v`, `pressure_full_scale_bar` — ingresso
   0-10 V della pressione; se chiudi i ponticelli per il 4-20 mA va riscritta la
   lambda di `filter_pressure`
+- `press_4_20_full_scale_bar` — bar a 20 mA dei trasmettitori di pressione 4-20 mA sui
+  loop 1 (monte) e 2 (valle); **da confermare sul datasheet**
+- `dp_backwash_bar` — differenziale oltre il quale si consiglia un controlavaggio
 - `k_factor_pulses_per_litre` — impulsi/litro del tuo flussometro
 - `tank_empty_m`, `tank_full_m`, `tank_litres` — geometria dei fusti misurata a mano
 - `dosing_pump_litres_per_s` — portata della pompa dosatrice, per l'autonomia
@@ -62,9 +68,10 @@ Tutti i valori stanno in cima a `spb-control.yaml`, nel blocco `substitutions`:
 - soglie di discordanza delle sonde e di flusso minimo
 
 Inoltre: gli indirizzi dei DS18B20 vanno letti dal log del primo avvio e scritti in
-`control-bus-sensors.yaml`, e i coefficienti di calibrazione pH/ORP (`cal_ph_slope`,
-`cal_ph_offset`, `cal_orp_slope`, `cal_orp_offset` in `control-logic.yaml`) vanno ricavati da
-una calibrazione a due punti con le soluzioni tampone. L'elenco completo dei
+`control-bus-sensors.yaml`, e pH/ORP vanno calibrati dal pannello (due punti, soluzioni
+tampone, selettore in MANUALE). Le soglie della pagina Parametri sono salvate in flash;
+i valori del primo avvio sono le substitutions e `rst|par` li ripristina. Cambia il
+`settings_pin` del display (default `1234`). L'elenco completo dei
 controlli è nella [checklist di prima accensione](../docs/bring-up.it.md).
 
 ## Simulatore e demo
@@ -75,7 +82,11 @@ un video usa le curve lente e realistiche:
 
 ```
 python spb_simulator.py COM7 --demo --speed 90
+python spb_simulator.py --selftest     # autotest del protocollo, senza porta seriale
 ```
+
+Il simulatore usa gli stessi frame S/P/G/A e le stesse regole di accettazione/rifiuto della
+scheda, calibrazione e programmatore inclusi; premi `h` per i tasti.
 
 e in `spb-display.yaml` imposta `trend_interval_s: "2"`. Un secondo reale
 corrisponde a 90 secondi simulati, quindi i grafici di Trends mostrano circa 12
@@ -116,8 +127,9 @@ prova veloci.
 - L'espansore CH32V003 usa un componente esterno
   (`github.com/fuzzybear62/esphome-waveshare_io_ch32v003`), bloccato su un
   commit: retroilluminazione regolabile e reset del pannello e del touch.
-- Otto pagine LVGL: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
-  Commands, Trends. La colonna di navigazione, l'intestazione e la barra di stato
+- Sedici pagine LVGL: Home, Filtrazione, Programmatore, Chimica, Valvole, Allarmi (due
+  pagine), Manutenzione, Comandi, Sinottico, Trend e il gruppo Impostazioni (menu, PIN,
+  Wi-Fi, Parametri, Calibrazione). La colonna di navigazione, l'intestazione e la barra di stato
   stanno nel `top_layer`, quindi esistono una volta sola invece di otto. Se un
   giorno il touch smettesse di rispondere sulle pagine, è il primo posto dove
   guardare.
@@ -127,5 +139,8 @@ prova veloci.
   `trend_interval_s` secondi (default 30), `trend_points` campioni per grafico
   (default 240, cioè le ultime 2 ore); se il collegamento cade, il grafico mostra
   un'interruzione. Lo storico sta in RAM e si perde al riavvio.
+- **Lingua.** Il pannello offre sempre italiano e inglese (Impostazioni). L'inglese è solo
+  il predefinito al primo avvio; la scelta è salvata in flash. I motivi di rifiuto arrivano
+  in inglese dalla scheda e il pannello li traduce.
 - Si aggiorna solo la pagina visibile, e ogni etichetta viene riscritta solo se il
   testo è cambiato davvero.

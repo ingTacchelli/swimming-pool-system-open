@@ -1,0 +1,170 @@
+# =============================================================================
+# SPB - control board: parameters editable from the panel, and calibration
+#
+# Thresholds and calibrations are variables stored in flash, so they can be
+# changed from the panel without rebuilding, with the commands:
+#
+#   C|n=..|c=set|v=<key>:<value>|    change a parameter (see table)
+#   C|n=..|c=rst|v=par|              restore the parameters to the build-time values
+#   C|n=..|c=calp|v=<buffer pH>|     capture a pH calibration point
+#   C|n=..|c=calo|v=<buffer mV>|     capture an ORP calibration point
+#   C|n=..|c=calc|v=p  or  v=o|      cancel the pending first point
+#
+#   key  parameter                                   accepted range
+#   fp   main circuit minimum flow (m3/h)            0 .. 100
+#   fc   measuring cell minimum flow (m3/h)          0 .. 20
+#   dp   maximum pH mismatch between the two probes  0.05 .. 2.00
+#   do   maximum ORP mismatch between the probes     5 .. 300 (mV)
+#   fn   "normal" pump frequency (Hz)                freq_min_hz .. freq_max_hz
+#   dl   filter differential for backwash (bar)      0.1 .. 3.0
+#
+# The ranges are common-sense limits chosen by the author, not plant limits: if
+# they are too tight, change them in the "set" branch of control-link-display.yaml.
+#
+# WARNING: the starting values come from the substitutions in spb-control.yaml,
+# but ONLY on the very first boot. Afterwards the live value is the one stored in
+# flash (globals with restore_value): changing the substitution and reflashing
+# does NOT change the threshold any more. To go back to the build-time values use
+# the "rst" command ("Restore defaults" button in the Parameters page).
+#
+# TWO-POINT CALIBRATION
+#   1. probe in the first buffer, wait for the voltage to settle, "calp"/"calo"
+#   2. probe in the second buffer, same thing. At the second point the line
+#      value = m * V + q is recomputed and the calibration is declared valid.
+#   The first point alone does NOT touch the calibration in use: if you stop
+#   there nothing changes (it expires after 10 minutes anyway). So a half-done
+#   calibration never leaves the plant with a wrong line.
+#   The voltage used is the moving average (~10 s) and the point is rejected if
+#   the instantaneous reading differs from it by more than 5 mV: probe still
+#   unstable. Plausibility checks on the new line: same sign and a slope between
+#   0.4 and 2.5 times the reference one (see the substitutions below). These are
+#   assumptions about the signal conditioning of this board: tune them.
+# =============================================================================
+
+substitutions:
+  cal_ph_slope_ref: "-3.5"      # reference slope pH/V (= initial value of cal_ph_slope)
+  cal_orp_slope_ref: "1000.0"   # reference slope mV/V
+  cal_slope_min: "0.4"
+  cal_slope_max: "2.5"
+  cal_min_dv: "0.020"           # minimum volts between the two points
+  cal_max_instab: "0.005"       # maximum volts between instantaneous reading and average
+
+globals:
+  # --- live parameters (stored in flash) -------------------------------------
+  - id: p_flow_main
+    type: float
+    restore_value: true
+    initial_value: '${flow_min_main}'
+  - id: p_flow_cell
+    type: float
+    restore_value: true
+    initial_value: '${flow_min_cell}'
+  - id: p_ph_mismatch
+    type: float
+    restore_value: true
+    initial_value: '${ph_disagreement_threshold}'
+  - id: p_orp_mismatch
+    type: float
+    restore_value: true
+    initial_value: '${orp_disagreement_threshold}'
+  - id: p_freq_normal
+    type: float
+    restore_value: true
+    initial_value: '${freq_normal_hz}'
+  - id: p_dp_backwash
+    type: float
+    restore_value: true
+    initial_value: '${dp_backwash_bar}'
+
+  # --- moving average of the raw probe voltages -------------------------------
+  - id: v_ph_avg
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+  - id: v_orp_avg
+    type: float
+    restore_value: false
+    initial_value: 'NAN'
+
+  # --- pending first calibration point ----------------------------------------
+  - id: cal_ph_pending
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: cal_ph_pv
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: cal_ph_pb
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: cal_ph_pt
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+  - id: cal_orp_pending
+    type: bool
+    restore_value: false
+    initial_value: 'false'
+  - id: cal_orp_pv
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: cal_orp_pb
+    type: float
+    restore_value: false
+    initial_value: '0'
+  - id: cal_orp_pt
+    type: uint32_t
+    restore_value: false
+    initial_value: '0'
+
+script:
+  # P frame: parameters and calibration state. Sent every 2 s and right after
+  # every settings command. Format:
+  #   P|fp|fc|dp|do|fn|vp|vo|cp|co|np|bp|no|bo|mp|mr|dl|
+  #   vp/vo = average probe voltage (V); cp/co = calibration valid (0/1);
+  #   np/no = first point pending (0/1) and bp/bo = its buffer;
+  #   mp/mr = slope of the line (pH/V, mV/V). -999 = not available.
+  - id: send_params
+    mode: restart
+    then:
+      - lambda: |-
+          auto f = [](float v) -> float { return isnan(v) ? -999.0f : v; };
+          uint32_t now = millis();
+          if (id(cal_ph_pending) && now - id(cal_ph_pt) > 600000UL) id(cal_ph_pending) = false;
+          if (id(cal_orp_pending) && now - id(cal_orp_pt) > 600000UL) id(cal_orp_pending) = false;
+
+          char body[300];
+          snprintf(body, sizeof(body),
+            "P|fp=%.2f|fc=%.2f|dp=%.2f|do=%.0f|fn=%.1f|vp=%.4f|vo=%.4f|cp=%d|co=%d"
+            "|np=%d|bp=%.2f|no=%d|bo=%.0f|mp=%.3f|mr=%.3f|dl=%.2f|",
+            id(p_flow_main), id(p_flow_cell), id(p_ph_mismatch), id(p_orp_mismatch),
+            id(p_freq_normal),
+            f(id(v_ph_avg)), f(id(v_orp_avg)),
+            id(cal_ph_valid) ? 1 : 0, id(cal_orp_valid) ? 1 : 0,
+            id(cal_ph_pending) ? 1 : 0, id(cal_ph_pb),
+            id(cal_orp_pending) ? 1 : 0, id(cal_orp_pb),
+            id(cal_ph_slope), id(cal_orp_slope), id(p_dp_backwash));
+          uint8_t x = 0;
+          for (const char *p = body; *p; p++) x ^= (uint8_t) *p;
+          char out[320];
+          snprintf(out, sizeof(out), "%s*%02X\n", body, x);
+          id(uart_panel).write_str(out);
+
+interval:
+  - interval: 2s
+    then:
+      - script.execute: send_params
+
+  # exponential moving average of the raw voltages (tau ~ 10 s)
+  - interval: 1s
+    then:
+      - lambda: |-
+          float v = id(ph_volt).state;
+          if (!isnan(v))
+            id(v_ph_avg) = isnan(id(v_ph_avg)) ? v : id(v_ph_avg) * 0.9f + v * 0.1f;
+          float o = id(orp_volt).state;
+          if (!isnan(o))
+            id(v_orp_avg) = isnan(id(v_orp_avg)) ? o : id(v_orp_avg) * 0.9f + o * 0.1f;

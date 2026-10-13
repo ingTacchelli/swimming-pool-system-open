@@ -19,8 +19,10 @@ collegati**, in quest'ordine.
    accanto a ciascuno di quei connettori e collega le pompe di conseguenza. Se
    vuoi un'associazione diversa, cambia solo i pin in
    `firmware/control/packages/control-outputs.yaml`.
-4. **Shunt.** Conferma che gli shunt dei 4-20 mA siano da 5,6 Ω; il valore è
-   `shunt_4_20ma` in `spb-control.yaml`.
+4. **Shunt e pressione.** Conferma che gli shunt dei 4-20 mA siano da 5,6 Ω (`shunt_4_20ma`
+   in `spb-control.yaml`). I loop 1 e 2 sono le pressioni del filtro: imposta
+   `press_4_20_full_scale_bar` dal datasheet del trasmettitore (i 4 bar di default sono
+   un'ipotesi) e verifica che il differenziale sia circa 0 a pompa ferma.
 5. **Ponticelli di CN12.** Senza ponticelli i canali di CN12 sono ingressi 0-10 V.
    Se li chiudi, l'ingresso diventa 4-20 mA e va riscritta la lambda di
    `filter_pressure`.
@@ -40,9 +42,10 @@ collegati**, in quest'ordine.
     `tank_empty_m` e `tank_full_m`.
 11. **Temperatura.** Leggi gli indirizzi dei DS18B20 dal log del primo avvio e
     scrivili in `control-bus-sensors.yaml`.
-12. **pH e ORP.** Esegui una calibrazione a due punti con le soluzioni tampone e
-    scrivi i coefficienti (`cal_ph_slope`, `cal_ph_offset`, `cal_orp_slope`, `cal_orp_offset`) in
-    `control-logic.yaml`.
+12. **pH e ORP.** Esegui la calibrazione a due punti dal pannello (Impostazioni, PIN,
+    Calibrazione) con soluzioni tampone fresche, selettore in MANUALE. La scheda controlla
+    stabilità e pendenza e salva il risultato in flash; il dosaggio resta bloccato finché
+    entrambe le calibrazioni non sono valide.
 13. **Portata.** Imposta `k_factor_pulses_per_litre` per il tuo flussometro e controlla il
     conteggio degli impulsi.
 

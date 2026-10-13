@@ -4,7 +4,18 @@
 
 *[Italiano](README.it.md)* · Rev A · designed by Ing. Andrea Tacchelli
 
-![The board, top side](hardware/layout/pcb-front.png)
+> **Status: proof of concept (POC).** A working prototype, shared to show the idea
+> and collect feedback. It is not a finished product: hardware, firmware and
+> documentation can still change. See [Status](#status).
+
+## See it in action
+
+[![Touch panel demo: synoptic, filtration, scheduler, chemistry, valves, alarms, settings](docs/media/display-demo.gif)](docs/media/display-demo.mp4)
+
+*The 7" touch panel driving the system: plant synoptic, filtration pump and
+scheduler, chemistry and dosing pulses, solenoid valves, alarms and the 13 dosing
+interlocks, maintenance, direct commands and settings with the English/Italian
+switch. Click the animation for the full-quality video (47 s).*
 
 ## In plain words
 
@@ -23,7 +34,7 @@ means test strips, buckets and guesswork. This board does it automatically.
 - **You control it** from a 7" touch screen on the cabinet, or from your phone or
   Home Assistant if you want. The pool keeps working without a network.
 
-It was designed, built and run on a real pool. This repository is everything
+It was designed and built as a working prototype for a real pool. This repository is everything
 needed to understand it, build it and improve it: schematic, PCB, parts list,
 firmware and documentation.
 
@@ -45,7 +56,7 @@ A two-layer board built around an ESP32-S3. The board prints its own name,
 | **Measures** | pH and ORP (two probes each for cross-checking), pressure, temperature (DS18B20), flow (2 pulse meters), tank levels (ultrasonic + float switches), 6 × 4-20 mA industrial loops, 16 dry contacts |
 | **Drives** | 4 relays (3 dosing pumps + filtration), 4 solenoid valves, an RS-485 Modbus link to a Toshiba VF-S15 inverter |
 | **Thinks** | ESP32-S3 running ESPHome: 13 dosing permissives, pulsed manual dosing with a hard time limit, backwash sequence, safe state at power-up |
-| **Shows** | Waveshare ESP32-S3 7" touch panel, 8 pages, linked by a 3-wire serial cable |
+| **Shows** | Waveshare ESP32-S3 7" touch panel, 16 pages (home, filtration, scheduler, chemistry, valves, alarms, maintenance, commands, synoptic, trends, PIN-protected settings with Wi-Fi, parameters and pH/ORP calibration), English or Italian at the touch of a button, linked by a 3-wire serial cable |
 | **Talks** | ESPHome native API (Home Assistant optional) |
 
 Datasheet: [docs/datasheet.md](docs/datasheet.md) · [wiring (draft)](docs/wiring.md) · [use cases](docs/use-cases.md)
@@ -55,10 +66,16 @@ Full details: [pin map](docs/pin-map.md) · [inputs and outputs](docs/io-map.md)
 
 ## Status
 
-Rev A is the first public release. It works on a real pool, with the known
-limitations listed in [docs/limitations.md](docs/limitations.md). It is a
-hobbyist-grade design shared for study, feedback and non-commercial use, and is
-**not** certified for any regulatory scheme. Read the [safety notice](#safety-notice).
+**Proof of concept.** Rev A is a working prototype: the board, the touch panel
+and the firmware run together, as shown in the [video](docs/media/display-demo.mp4).
+It is not yet a finished, field-proven product: some hardware details are still to
+be confirmed (see [docs/limitations.md](docs/limitations.md) and the
+[wiring draft](docs/wiring.md)), and connectors, firmware and protocol may change
+in the next revision.
+
+It is a hobbyist-grade design shared for study, feedback and non-commercial use,
+and is **not** certified for any regulatory scheme. Read the
+[safety notice](#safety-notice).
 
 ## Help us improve it
 
@@ -81,6 +98,20 @@ it interesting are all welcome.
   [Contact](#contact).
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) for how to report things well.
+
+## The touch panel
+
+A 7" touch panel shows the plant and sends command requests; the control board
+checks every request and can refuse it, returning the reason. Highlights:
+filtration scheduler (daily, weekly, winter, shock, photovoltaic), two-point pH/ORP
+calibration, plant parameters saved in flash, filter differential pressure with a
+"backwash advised" notice, a synoptic diagram, Trends charts, and a language
+switch (**Italian is always available** in Settings; English is only the default
+at first boot).
+
+[Watch the demo video](docs/media/display-demo.mp4) (also at the
+[top of this page](#see-it-in-action)) · details in
+[firmware/README.md](firmware/README.md) and the [panel protocol](docs/uart-protocol.md).
 
 ## Getting started
 
@@ -117,14 +148,13 @@ These are ideas for Rev B, not promises. Your feedback decides the order.
 
 **Firmware and panel**
 - Show **which alarm** fired, not only how many.
-- A **calibration wizard** on the touch panel for pH and ORP.
 - Read **more temperature sensors** (for example the electrolysis cell).
-- **Language selection** and a double-buffered display for a smoother screen.
+- A double-buffered display for a smoother screen.
 - Ready-made **Home Assistant dashboards** and notifications.
-- Weekly timers for the filtration scenarios (they need the battery-backed clock).
+- Make the filtration schedule independent of the network clock (needs the battery-backed clock).
 
 **Documentation**
-- The assembly guide, a wiring guide per connector, and a short video.
+- The assembly guide, and a wiring guide per connector.
 - A commissioning guide for installers.
 
 ## Safety notice

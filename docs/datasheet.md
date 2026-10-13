@@ -17,6 +17,7 @@ Preliminary: values marked **TBC** are to be confirmed at bring-up.
 | Software | ESPHome (ESP-IDF); native API; Home Assistant optional |
 | User interface | Waveshare ESP32-S3-Touch-LCD-7B, 7", 1024 × 600, touch, 3-wire serial link |
 | Revision | Rev A (printed on the board as "Rev 0.A") |
+| Status | proof of concept (working prototype) |
 
 ## Inputs
 

@@ -30,7 +30,7 @@ items are closed.
 | CN10 | ELETTROVALVOLE | solenoid valves EV1-EV4 (5 pins: four outputs and the common) | confirmed, pinout to document |
 | CN11 | RS485A | RS-485 to the inverter | confirmed, pinout to document |
 | CN6 | vfd pot | speed reference (digital potentiometer, unused by the firmware) | confirmed |
-| CN12 | | analog input 0-10 V, pressure | confirmed |
+| CN12 | | analog input 0-10 V, pressure (the filter differential uses the 4-20 mA loops 1 and 2, see pin-map) | confirmed |
 | CN19-CN22 | PH-5A | 16 dry-contact inputs | confirmed; function per connector to document |
 | RF1, RF2 | | BNC: pH and ORP probes | confirmed |
 | U29 | | emergency-chain monitor (pin 1), flow B (pin 2), flow A (pin 3) | confirmed |

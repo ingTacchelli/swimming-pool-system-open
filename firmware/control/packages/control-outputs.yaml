@@ -6,16 +6,16 @@
 # boot and flashing the relays stay off even with the GPIOs floating. The
 # firmware also puts them in the safe state at boot.
 #
-#   GPIO18  CN8  "ACIDO"       -> dosing_relay_acid
-#   GPIO7   CN18 "DOSATRICE"   -> dosing_relay_chlorine
-#   GPIO17  CN7  "PH"          -> dosing_relay_reserve
-#   GPIO10  CN9  "FILTRAGGIO"  -> filtration_relay
+#   GPIO18  CN8 (assumed)  -> dosing_relay_acid
+#   GPIO7   CN18           -> dosing_relay_chlorine
+#   GPIO17  CN7 (assumed)  -> dosing_relay_reserve
+#   GPIO10  CN9            -> filtration_relay
 #
 #   The mapping between silkscreen and pump is explained at the top of
 #   spb-control.yaml. If your wiring differs, change only the pins below.
 #
 # Solenoid valves (UCC27517 gate driver + 50N06 MOSFET, powered from +12 V):
-#   GPIO14 EV1 / GPIO13 EV2 / GPIO12 EV3 / GPIO11 EV4
+#   GPIO14 EV1 / GPIO13 EV2 / GPIO12 EV3 / GPIO11 EV4 = pool lighting
 #
 # All outputs are active high and start off (safe state).
 # =============================================================================
@@ -72,10 +72,10 @@ switch:
 
   - platform: gpio
     id: ev4
-    name: "EV4 reserve"
+    name: "Pool lighting"   # formerly "EV4 reserve": the output drives the light, not a valve
     pin: GPIO11
     restore_mode: ALWAYS_OFF
-    icon: mdi:valve
+    icon: mdi:lightbulb
 
 # -----------------------------------------------------------------------------
 # Pulsed dosing (jog): manual dosing is never a continuous ON.

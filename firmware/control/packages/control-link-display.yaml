@@ -11,8 +11,10 @@
 #
 # Message format: see docs/uart-protocol.md
 #   S|...|*XX\n   status, sent every 500 ms
+#   P|...|*XX\n   parameters and calibration state, every 2 s (control-settings.yaml)
+#   G|...|*XX\n   filtration schedule, every 2 s (control-schedule.yaml)
 #   C|...|*XX\n   command received from the display
-#   A|...|*XX\n   command reply (ok / err + reason)
+#   A|...|*XX\n   command reply (ok / err + reason, reasons in English)
 #
 # The checksum is the XOR of all characters before the asterisk (last '|'
 # included), as two uppercase hex digits.
@@ -56,11 +58,30 @@ interval:
           ev[3] = id(ev4).state ? '1' : '0';
           ev[4] = 0;
 
-          char body[400];
+          // the 13 dosing permissives, in order C01..C13: '1' = satisfied
+          char cb[14];
+          const bool cv[13] = {
+            id(c01_pump).state, id(c02_main_flow).state, id(c03_cell_flow).state,
+            id(c04_ph_valid).state, id(c05_orp_valid).state, id(c06_ph_agree).state,
+            id(c07_orp_agree).state, id(c08_ph_cal).state, id(c09_orp_cal).state,
+            id(c10_levels).state, id(c11_no_alarms).state, id(c12_not_backwashing).state,
+            id(c13_selector_auto).state };
+          for (int i = 0; i < 13; i++) cb[i] = cv[i] ? '1' : '0';
+          cb[13] = 0;
+
+          // local date and time of the board (SNTP) for the panel clock
+          char dt[16] = "0";
+          {
+            auto tt = id(local_time).now();
+            if (tt.is_valid()) snprintf(dt, sizeof(dt), "%04d%02d%02d%02d%02d",
+              tt.year, tt.month, tt.day_of_month, tt.hour, tt.minute);
+          }
+
+          char body[500];
           snprintf(body, sizeof(body),
             "S|mo=%s|tv=%.1f|tc=%.1f|ph=%.2f|ps=%.2f|or=%.0f|os=%.0f|hz=%.1f|cu=%.1f"
             "|pu=%d|q1=%.1f|q2=%.1f|l1=%.0f|l2=%.0f|l3=%.0f|f1=%d|f2=%d|f3=%d"
-            "|ev=%s|do=%d|cs=%.0f|al=%d|",
+            "|ev=%s|do=%d|cs=%.0f|al=%d|cb=%s|pa=%.2f|pb=%.2f|dd=%.2f|lc=%d|dt=%s|",
             mo,
             f(id(pool_temperature).state), -999.0f,
             f(id(ph_primary).state), f(id(ph_secondary).state),
@@ -73,11 +94,13 @@ interval:
             ev,
             id(dosing_enabled).state ? 1 : 0,
             f(id(permissives_ok).state),
-            id(active_alarms));
+            id(active_alarms), cb,
+            f(id(pressure_upstream).state), f(id(pressure_downstream).state), f(id(delta_p).state),
+            id(backwash_advised).state ? 1 : 0, dt);
 
           uint8_t x = 0;
           for (const char *p = body; *p; p++) x ^= (uint8_t) *p;
-          char out[420];
+          char out[520];
           snprintf(out, sizeof(out), "%s*%02X\n", body, x);
           id(uart_panel).write_str(out);
 
@@ -138,11 +161,16 @@ interval:
             } else if (cmd == "pump") {
               if (!manual) { why = "selector not in MANUAL"; }
               else {
-                float hz = (val == "1") ? ${freq_normal_hz} : 0.0f;
-                auto call = id(vfd_setpoint).make_call();
-                call.set_value(hz);
-                call.perform();
-                if (val == "1") id(vfd_run).turn_on(); else id(vfd_run).turn_off();
+                // Stop = run command only. Writing 0 to the reference does not
+                // work: below min_value (freq_min_hz) ESPHome discards the value.
+                if (val == "1") {
+                  auto call = id(vfd_setpoint).make_call();
+                  call.set_value(id(p_freq_normal));
+                  call.perform();
+                  id(vfd_run).turn_on();
+                } else {
+                  id(vfd_run).turn_off();
+                }
                 ok = true;
               }
             } else if (cmd == "hz") {
@@ -184,6 +212,112 @@ interval:
               if (!manual) { why = "selector not in MANUAL"; }
               else if (val == "1") { id(backwash)->execute(); ok = true; }
               else { id(backwash)->stop(); id(in_backwash) = false; ok = true; }
+            } else if (cmd == "set") {
+              // v = key:value. Ranges: see control-settings.yaml
+              size_t sp = val.find(':');
+              std::string key = (sp == std::string::npos) ? std::string() : val.substr(0, sp);
+              char *endp = nullptr;
+              float x = NAN;
+              if (sp != std::string::npos) {
+                const char *num = val.c_str() + sp + 1;
+                x = strtof(num, &endp);
+                if (endp == num) x = NAN;
+              }
+              if (isnan(x)) { why = "invalid value"; }
+              else if (key == "fp") {
+                if (x < 0.0f || x > 100.0f) why = "value out of range";
+                else { id(p_flow_main) = x; ok = true; }
+              } else if (key == "fc") {
+                if (x < 0.0f || x > 20.0f) why = "value out of range";
+                else { id(p_flow_cell) = x; ok = true; }
+              } else if (key == "dp") {
+                if (x < 0.05f || x > 2.0f) why = "value out of range";
+                else { id(p_ph_mismatch) = x; ok = true; }
+              } else if (key == "do") {
+                if (x < 5.0f || x > 300.0f) why = "value out of range";
+                else { id(p_orp_mismatch) = x; ok = true; }
+              } else if (key == "fn") {
+                if (x < ${freq_min_hz} || x > ${freq_max_hz}) why = "frequency out of range";
+                else { id(p_freq_normal) = x; ok = true; }
+              } else if (key == "dl") {
+                if (x < 0.1f || x > 3.0f) why = "value out of range";
+                else { id(p_dp_backwash) = x; ok = true; }
+              } else if (key.size() == 3 && key[0] == 'g') {
+                // filtration schedule (see control-schedule.yaml)
+                int *dst = nullptr; int hi = 1439;
+                if (key == "gpr") { dst = &id(sch_program); hi = 3; }
+                else if (key == "gmo") { dst = &id(sch_mode); hi = 2; }
+                else if (key == "gfv") { dst = &id(sch_pv); hi = 1; }
+                else if (key == "gsh") { dst = &id(sch_shock); hi = 1; }
+                else if (key == "gin") dst = &id(sch_start);
+                else if (key == "gfi") dst = &id(sch_end);
+                else if (key == "gvi") dst = &id(sch_pv_start);
+                else if (key == "gvf") dst = &id(sch_pv_end);
+                if (dst == nullptr) why = "unknown parameter";
+                else if (x < 0.0f || x > (float) hi) why = "value out of range";
+                else { *dst = (int) lroundf(x); ok = true; }
+              } else {
+                why = "unknown parameter";
+              }
+            } else if (cmd == "rst") {
+              if (val != "par") { why = "unknown reset"; }
+              else {
+                id(p_flow_main) = ${flow_min_main};
+                id(p_flow_cell) = ${flow_min_cell};
+                id(p_ph_mismatch) = ${ph_disagreement_threshold};
+                id(p_orp_mismatch) = ${orp_disagreement_threshold};
+                id(p_freq_normal) = ${freq_normal_hz};
+                id(p_dp_backwash) = ${dp_backwash_bar};
+                ok = true;
+              }
+            } else if (cmd == "calc") {
+              if (val == "p") { id(cal_ph_pending) = false; ok = true; }
+              else if (val == "o") { id(cal_orp_pending) = false; ok = true; }
+              else why = "unknown probe";
+            } else if (cmd == "calp" || cmd == "calo") {
+              // Two-point calibration. MANUAL only: with the probes in the buffer
+              // the readings are fake and automatic dosing must not be able to use them.
+              const bool isph = (cmd == "calp");
+              char *endp = nullptr;
+              float buf = strtof(val.c_str(), &endp);
+              float vavg = isph ? id(v_ph_avg) : id(v_orp_avg);
+              float vraw = isph ? id(ph_volt).state : id(orp_volt).state;
+              if (!manual) { why = "selector not in MANUAL"; }
+              else if (endp == val.c_str()) { why = "invalid buffer value"; }
+              else if (isph ? (buf < 1.0f || buf > 13.0f) : (buf < -500.0f || buf > 1200.0f)) {
+                why = "buffer out of range";
+              } else if (isnan(vavg) || isnan(vraw)) { why = "probe has no reading"; }
+              else if (fabsf(vraw - vavg) > ${cal_max_instab}) { why = "unstable reading"; }
+              else {
+                bool &pend = isph ? id(cal_ph_pending) : id(cal_orp_pending);
+                float &pv = isph ? id(cal_ph_pv) : id(cal_orp_pv);
+                float &pb = isph ? id(cal_ph_pb) : id(cal_orp_pb);
+                uint32_t &pt = isph ? id(cal_ph_pt) : id(cal_orp_pt);
+                uint32_t now = millis();
+                if (pend && now - pt > 600000UL) pend = false;
+                if (!pend) {
+                  pend = true; pv = vavg; pb = buf; pt = now;
+                  ok = true;                       // first point: nothing changes yet
+                } else if (fabsf(buf - pb) < (isph ? 1.0f : 50.0f)) {
+                  why = "buffer same as first point";
+                } else if (fabsf(vavg - pv) < ${cal_min_dv}) {
+                  why = "voltage same as first point";
+                } else {
+                  float m = (buf - pb) / (vavg - pv);
+                  float q = buf - m * vavg;
+                  float ref = isph ? ${cal_ph_slope_ref} : ${cal_orp_slope_ref};
+                  float ratio = m / ref;              // < 0 if the sign is opposite
+                  if (ratio < ${cal_slope_min} || ratio > ${cal_slope_max}) {
+                    why = "abnormal slope";
+                    pend = false;
+                  } else {
+                    if (isph) { id(cal_ph_slope) = m; id(cal_ph_offset) = q; id(cal_ph_valid) = true; }
+                    else { id(cal_orp_slope) = m; id(cal_orp_offset) = q; id(cal_orp_valid) = true; }
+                    pend = false;
+                    ok = true;
+                  }
+                }
+              }
             } else if (cmd == "ackal") {
               id(active_alarms) = 0;
               ok = true;
@@ -201,6 +335,11 @@ interval:
             char out[180];
             snprintf(out, sizeof(out), "%s*%02X\n", body, xa);
             id(uart_panel).write_str(out);
+
+            // after a settings command the panel immediately receives the new values
+            if (cmd == "set" || cmd == "rst" || cmd == "calp" || cmd == "calo" || cmd == "calc")
+              id(send_params)->execute();
+            if (cmd == "set") id(send_schedule)->execute();
           }
 
 sensor:

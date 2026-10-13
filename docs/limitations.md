@@ -31,8 +31,15 @@ next revision.
 - **Inverter registers.** The scale of the output-current register (FD03) and the
   FA00 run bit have to be checked on your drive (see
   [bring-up.md](bring-up.md)).
-- **pH and ORP calibration coefficients** in `control-logic.yaml` are
-  placeholders: they must be derived from a two-point calibration.
+- **Calibration is not done at the factory.** Until a two-point calibration is made
+  from the panel, the coefficients are placeholders and dosing stays blocked.
+- **Pressure full scale** (4 bar at 20 mA) is an assumption: confirm it on the
+  transmitter datasheet.
+- **Scenarios.** The `scen` command exists on the panel but the board does not
+  implement it yet; use the scheduler.
+- **Scheduler and clock.** Programs depend on SNTP time (see the clock limit
+  above); the shock mode is deliberately not saved to flash.
+- **Default settings PIN is 1234**: change `settings_pin` before use.
 - **Display refresh.** The panel component uses a single frame buffer, so some
   tearing artefacts in the refresh are unavoidable by construction. Removing
   them needs a local copy of the display component with a double frame buffer.
@@ -40,5 +47,5 @@ next revision.
   in RAM: a reset empties them, and nothing is stored or exported. They are
   drawn by code, outside the ESPHome LVGL schema; check the boot log for
   allocation errors after opening the page (see [bring-up.md](bring-up.md)).
-- **English only.** Entity names, panel labels and refusal reasons are in
-  English; there is no language selection.
+- **Languages.** Entity names and the control-board messages are in English; the
+  panel offers English and Italian (Settings), with English as the default at first boot.

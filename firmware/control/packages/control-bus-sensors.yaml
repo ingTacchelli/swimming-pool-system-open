@@ -54,8 +54,10 @@ sensor:
 
   # -----------------------------------------------------------------------------
   # Primary pH and ORP probes: BNC electrodes -> op-amp stages -> ADS1115
-  # The coefficients in control-logic.yaml are placeholders: derive them from a
-  # two-point calibration (front end: 0.47 V in -> 0 V out, -0.47 V in -> 2 V out).
+  # The coefficients (cal_ph_slope/offset, cal_orp_slope/offset) live in
+  # control-settings.yaml. Until a two-point calibration is done they are
+  # placeholders and dosing stays locked (see the calibration commands).
+  # Front end: 0.47 V in -> 0 V out, -0.47 V in -> 2 V out.
   # -----------------------------------------------------------------------------
   - platform: ads1115
     ads1115_id: ads_probes
@@ -77,7 +79,7 @@ sensor:
 
   # --- CN12: two dual-range analog inputs --------------------------------------
   # AIN3 = CN12 pin 1 -> filter pressure 0-10 V
-  # AIN2 = CN12 pin 2 -> spare, raw voltage only for now
+  # AIN2 = CN12 pin 2 -> spare, exposed as raw voltage
   - platform: ads1115
     ads1115_id: ads_probes
     multiplexer: 'A3_GND'
@@ -146,6 +148,13 @@ sensor:
   # 4-20 mA channels on INA3221.
   # The 5.6 ohm shunts give 112 mV at 20 mA against a 163.8 mV full scale,
   # about 2800 counts.
+  #
+  # Channel assignment:
+  #   ch1  filter pressure, upstream (inlet)
+  #   ch2  filter pressure, downstream (outlet)
+  #   ch3  pH secondary probe
+  #   ch4  ORP secondary probe
+  #   ch5, ch6  spare
   # -----------------------------------------------------------------------------
   - platform: ina3221
     address: 0x40
@@ -155,19 +164,19 @@ sensor:
       shunt_resistance: ${shunt_4_20ma}
       current:
         id: ina1_c1
-        name: "4-20mA ch1 - pH secondary"
+        name: "4-20mA ch1 - filter pressure upstream"
         internal: true
     channel_2:
       shunt_resistance: ${shunt_4_20ma}
       current:
         id: ina1_c2
-        name: "4-20mA ch2 - ORP secondary"
+        name: "4-20mA ch2 - filter pressure downstream"
         internal: true
     channel_3:
       shunt_resistance: ${shunt_4_20ma}
       current:
         id: ina1_c3
-        name: "4-20mA ch3 - reserve"
+        name: "4-20mA ch3 - pH secondary"
         internal: true
 
   - platform: ina3221
@@ -178,7 +187,7 @@ sensor:
       shunt_resistance: ${shunt_4_20ma}
       current:
         id: ina2_c1
-        name: "4-20mA ch4 - reserve"
+        name: "4-20mA ch4 - ORP secondary"
         internal: true
     channel_2:
       shunt_resistance: ${shunt_4_20ma}
@@ -193,6 +202,45 @@ sensor:
         name: "4-20mA ch6 - reserve"
         internal: true
 
+  # Filter pressure before and after the filter (4-20 mA transmitters on channels
+  # 1 and 2 of the first INA3221). Full scale = substitution press_4_20_full_scale_bar
+  # (4 mA = 0 bar). Open loop (< 3.6 mA) or overcurrent (> 21 mA) => invalid value.
+  # The differential pressure (upstream - downstream) measures how dirty the
+  # filter is: above the threshold (parameter "dl", default dp_backwash_bar) for
+  # 5 minutes with the pump running, the board flags "backwash advised"
+  # (see control-logic.yaml).
+  - platform: template
+    name: "Filter pressure upstream"
+    id: pressure_upstream
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float ma = id(ina1_c1).state * 1000.0f;
+      if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
+      return (ma - 4.0f) * ${press_4_20_full_scale_bar} / 16.0f;
+
+  - platform: template
+    name: "Filter pressure downstream"
+    id: pressure_downstream
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      float ma = id(ina1_c2).state * 1000.0f;
+      if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
+      return (ma - 4.0f) * ${press_4_20_full_scale_bar} / 16.0f;
+
+  - platform: template
+    name: "Filter differential pressure"
+    id: delta_p
+    unit_of_measurement: "bar"
+    accuracy_decimals: 2
+    update_interval: 5s
+    lambda: |-
+      if (isnan(id(pressure_upstream).state) || isnan(id(pressure_downstream).state)) return {};
+      return id(pressure_upstream).state - id(pressure_downstream).state;
+
   # 4-20 mA -> physical quantity.
   # open loop (< 3.6 mA) or overcurrent (> 21 mA) => invalid value
   - platform: template
@@ -202,7 +250,7 @@ sensor:
     accuracy_decimals: 2
     update_interval: 5s
     lambda: |-
-      float ma = id(ina1_c1).state * 1000.0f;
+      float ma = id(ina1_c3).state * 1000.0f;
       if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
       return 0.0f + (ma - 4.0f) * (14.0f - 0.0f) / 16.0f;   // 0-14 pH scale
 
@@ -213,7 +261,7 @@ sensor:
     accuracy_decimals: 0
     update_interval: 5s
     lambda: |-
-      float ma = id(ina1_c2).state * 1000.0f;
+      float ma = id(ina2_c1).state * 1000.0f;
       if (isnan(ma) || ma < 3.6f || ma > 21.0f) return {};
       return -1000.0f + (ma - 4.0f) * (2000.0f) / 16.0f;    // -1000..+1000 mV scale
 

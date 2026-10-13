@@ -4,7 +4,19 @@
 
 *[English](README.md)* · Rev A · progettato da Ing. Andrea Tacchelli
 
-![La scheda, lato superiore](hardware/layout/pcb-front.png)
+> **Stato: proof of concept (POC).** Un prototipo funzionante, condiviso per
+> mostrare l'idea e raccogliere feedback. Non è un prodotto finito: hardware,
+> firmware e documentazione possono ancora cambiare. Vedi [Stato](#stato).
+
+## Guardalo in funzione
+
+[![Demo del pannello touch: sinottico, filtrazione, programmatore, chimica, valvole, allarmi, impostazioni](docs/media/display-demo.gif)](docs/media/display-demo.mp4)
+
+*Il pannello touch da 7" che comanda il sistema: sinottico dell'impianto, pompa di
+filtrazione e programmatore, chimica e impulsi di dosaggio, elettrovalvole, allarmi
+e i 13 consensi al dosaggio, manutenzione, comandi diretti e impostazioni con il
+cambio lingua italiano/inglese. Clicca l'animazione per il video in qualità piena
+(47 s).*
 
 ## In parole semplici
 
@@ -25,7 +37,7 @@ fa in automatico.
 - **Si controlla** da un touch screen da 7" sul quadro, oppure da telefono o Home
   Assistant se lo desideri. L'impianto funziona anche senza rete.
 
-È stata progettata, costruita e fatta funzionare su una piscina vera. Questo
+È stata progettata e costruita come prototipo funzionante per una piscina vera. Questo
 repository contiene tutto per capirla, costruirla e migliorarla: schema, PCB,
 distinta componenti, firmware e documentazione.
 
@@ -47,7 +59,7 @@ nome, "PSI Pool System Integrated, Acquisition Card Rev 0.A": è questa Rev A.
 | **Misura** | pH e ORP (due sonde ciascuno per il controllo incrociato), pressione, temperatura (DS18B20), portata (2 contatori a impulsi), livello fusti (ultrasuoni + galleggianti), 6 anelli 4-20 mA industriali, 16 contatti puliti |
 | **Comanda** | 4 relè (3 pompe dosatrici + filtrazione), 4 elettrovalvole, un collegamento RS-485 Modbus verso un inverter Toshiba VF-S15 |
 | **Decide** | ESP32-S3 con ESPHome: 13 consensi al dosaggio, dosaggio manuale a impulsi con durata massima, sequenza di controlavaggio, stato sicuro all'accensione |
-| **Mostra** | pannello touch Waveshare ESP32-S3 da 7", 8 pagine, collegato con un cavo seriale a 3 fili |
+| **Mostra** | pannello touch Waveshare ESP32-S3 da 7", 16 pagine (home, filtrazione, programmatore, chimica, valvole, allarmi, manutenzione, comandi, sinottico, trend, impostazioni con PIN: Wi-Fi, parametri e calibrazione pH/ORP), italiano o inglese con un tocco, collegato con un cavo seriale a 3 fili |
 | **Comunica** | API nativa ESPHome (Home Assistant facoltativo) |
 
 Scheda tecnica: [docs/datasheet.it.md](docs/datasheet.it.md) · [cablaggio (bozza)](docs/wiring.it.md) · [casi d'uso](docs/use-cases.it.md)
@@ -57,11 +69,16 @@ Dettagli: [mappa dei pin](docs/pin-map.it.md) · [ingressi e uscite](docs/io-map
 
 ## Stato
 
-La Rev A è la prima release pubblica. Funziona su una piscina vera, con i limiti
-noti elencati in [docs/limitations.it.md](docs/limitations.it.md). È un progetto
-di livello amatoriale condiviso per studio, feedback e uso non commerciale, e
-**non** è certificato per alcuno schema normativo. Leggi l'[avviso di
-sicurezza](#avviso-di-sicurezza).
+**Proof of concept.** La Rev A è un prototipo funzionante: scheda, pannello touch
+e firmware lavorano insieme, come si vede nel [video](docs/media/display-demo.mp4).
+Non è ancora un prodotto finito e collaudato sul campo: alcuni dettagli hardware
+sono ancora da confermare (vedi [docs/limitations.it.md](docs/limitations.it.md) e
+la [bozza del cablaggio](docs/wiring.it.md)), e connettori, firmware e protocollo
+possono cambiare nella prossima revisione.
+
+È un progetto di livello amatoriale condiviso per studio, feedback e uso non
+commerciale, e **non** è certificato per alcuno schema normativo. Leggi
+l'[avviso di sicurezza](#avviso-di-sicurezza).
 
 ## Aiutaci a migliorarlo
 
@@ -84,6 +101,20 @@ tutti benvenuti.
   [Contatti](#contatti).
 
 Vedi [CONTRIBUTING.md](CONTRIBUTING.md) per segnalare bene i problemi.
+
+## Il pannello touch
+
+Un pannello touch da 7" mostra l'impianto e invia richieste di comando; la scheda
+di controllo verifica ogni richiesta e può rifiutarla indicandone il motivo. In
+sintesi: programmatore di filtrazione (giornaliero, settimanale, invernale, shock,
+fotovoltaico), calibrazione pH/ORP a due punti, parametri d'impianto salvati in
+flash, pressione differenziale del filtro con avviso di controlavaggio, schema
+sinottico, grafici Trend e cambio lingua (**l'italiano è sempre disponibile** in
+Impostazioni; l'inglese è solo il predefinito al primo avvio).
+
+[Guarda il video dimostrativo](docs/media/display-demo.mp4) (anche in
+[cima alla pagina](#guardalo-in-funzione)) · dettagli in
+[firmware/README.it.md](firmware/README.it.md) e nel [protocollo del pannello](docs/uart-protocol.it.md).
 
 ## Per iniziare
 
@@ -121,15 +152,14 @@ Sono idee per la Rev B, non promesse. Il tuo feedback decide l'ordine.
 
 **Firmware e pannello**
 - Mostrare **quale allarme** è scattato, non solo quanti.
-- Una **procedura guidata di calibrazione** sul touch per pH e ORP.
 - Leggere **più sensori di temperatura** (per esempio la cella di elettrolisi).
-- **Scelta della lingua** e display con doppio buffer per uno schermo più fluido.
+- Display con doppio buffer per uno schermo più fluido.
 - **Dashboard Home Assistant** pronte e notifiche.
-- Timer settimanali per gli scenari di filtrazione (richiedono l'orologio con
+- Rendere il programmatore indipendente dall'orologio di rete (richiede l'orologio con
   batteria).
 
 **Documentazione**
-- La guida al montaggio, una guida al cablaggio per connettore e un breve video.
+- La guida al montaggio, e una guida al cablaggio per connettore.
 - Una guida alla messa in servizio per gli installatori.
 
 ## Avviso di sicurezza

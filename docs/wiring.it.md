@@ -30,7 +30,7 @@ confermare* non sono chiuse.
 | CN10 | ELETTROVALVOLE | elettrovalvole EV1-EV4 (5 poli: quattro uscite e il comune) | confermato, piedinatura da documentare |
 | CN11 | RS485A | RS-485 verso l'inverter | confermato, piedinatura da documentare |
 | CN6 | vfd pot | riferimento di velocità (potenziometro digitale, non usato dal firmware) | confermato |
-| CN12 | | ingresso analogico 0-10 V, pressione | confermato |
+| CN12 | | ingresso analogico 0-10 V, pressione (il differenziale del filtro usa i loop 4-20 mA 1 e 2, vedi pin-map) | confermato |
 | CN19-CN22 | PH-5A | 16 ingressi a contatto pulito | confermato; funzione per connettore da documentare |
 | RF1, RF2 | | BNC: sonde pH e ORP | confermato |
 | U29 | | monitor catena di emergenza (pin 1), portata B (pin 2), portata A (pin 3) | confermato |

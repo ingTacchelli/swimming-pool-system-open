@@ -17,8 +17,10 @@ this order.
    CN9 = filtration (GPIO10). Check the text printed on your PCB next to each of
    those connectors, and wire the pumps accordingly. If you want a different
    mapping, change only the pins in `firmware/control/packages/control-outputs.yaml`.
-4. **Shunts.** Confirm the 4-20 mA shunt resistors are 5.6 Ω; the value is
-   `shunt_4_20ma` in `spb-control.yaml`.
+4. **Shunts and pressure.** Confirm the 4-20 mA shunt resistors are 5.6 Ω (`shunt_4_20ma`
+   in `spb-control.yaml`). Loops 1 and 2 are the filter pressures: set
+   `press_4_20_full_scale_bar` from the transmitter datasheet (the default 4 bar is an
+   assumption) and check the differential reads about 0 with the pump stopped.
 5. **CN12 jumpers.** With no jumpers CN12 channels are 0-10 V inputs. If you close
    them, the input becomes 4-20 mA and the `filter_pressure` lambda must be
    rewritten.
@@ -37,9 +39,10 @@ this order.
     set `tank_empty_m` and `tank_full_m`.
 11. **Temperature.** Read the DS18B20 addresses from the first-boot log and write
     them in `control-bus-sensors.yaml`.
-12. **pH and ORP.** Run a two-point calibration with buffer solutions and write
-    the coefficients (`cal_ph_slope`, `cal_ph_offset`, `cal_orp_slope`, `cal_orp_offset`) in
-    `control-logic.yaml`.
+12. **pH and ORP.** Run the two-point calibration from the panel (Settings, PIN,
+    Calibration) with fresh buffer solutions, selector in MANUAL. The board checks
+    stability and slope and stores the result in flash; dosing stays blocked until
+    both calibrations are valid.
 13. **Flow.** Set `k_factor_pulses_per_litre` for your flow meter and check the pulse
     counts.
 

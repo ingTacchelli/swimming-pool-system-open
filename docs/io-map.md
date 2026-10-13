@@ -16,8 +16,9 @@ carries only the display, its touch controller and the serial link.
 | Current loops | 4-20 mA | 6 | INA3221 × 2 on 5.6 Ω shunts | 0x40, 0x41 |
 
 The potentiometric front end needs a negative rail for the amplifier, produced
-locally by a charge pump. Two of the six loops are used for the secondary pH and
-ORP transmitters; four are free.
+locally by a charge pump. Four of the six loops are used: 1 and 2 read the filter
+pressure transmitters (upstream and downstream, for the differential), 3 and 4
+the secondary pH and ORP transmitters; 5 and 6 are free.
 
 ### Digital and counting inputs
 

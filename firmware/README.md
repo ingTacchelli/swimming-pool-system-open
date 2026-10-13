@@ -25,8 +25,10 @@ control/
     control-vfd-modbus.yaml       Toshiba VF-S15 over RS-485 Modbus RTU
     control-logic.yaml           calibrations, 13 dosing permissives, backwash, autonomy
     control-link-display.yaml     UART protocol, control-board side
+    control-settings.yaml         parameters saved in flash (p_*), pH/ORP two-point calibration
+    control-schedule.yaml         filtration scheduler: programs, modes, photovoltaic, shock
 display/
-  spb-display.yaml              <- single file: panel, touch, UART link, LVGL (8 pages)
+  spb-display.yaml              <- single file: panel, touch, UART link, LVGL (16 pages, English/Italian)
 simulator/
   spb_simulator.py              simulates the control board over a USB-serial adapter
 secrets.yaml.example            <- copy to secrets.yaml and fill in
@@ -50,10 +52,14 @@ compile time, so the build machine needs internet access.
 
 All values are at the top of `spb-control.yaml`, in the `substitutions` block:
 
+- `timezone` — time zone of the installation (also in `spb-display.yaml`)
 - `shunt_4_20ma` — 5.6 ohm
 - `cn12_ratio`, `cn12_full_scale_v`, `pressure_full_scale_bar` — the 0-10 V
   pressure input; if you close the jumpers for 4-20 mA, rewrite the
   `filter_pressure` lambda
+- `press_4_20_full_scale_bar` — bar at 20 mA of the 4-20 mA pressure transmitters on
+  loops 1 (upstream) and 2 (downstream); **confirm on the datasheet**
+- `dp_backwash_bar` — differential above which a backwash is advised
 - `k_factor_pulses_per_litre` — pulses per litre of your flow meter
 - `tank_empty_m`, `tank_full_m`, `tank_litres` — drum geometry, measured by hand
 - `dosing_pump_litres_per_s` — dosing pump flow, for the autonomy estimate
@@ -61,9 +67,10 @@ All values are at the top of `spb-control.yaml`, in the `substitutions` block:
 - probe-disagreement and minimum-flow thresholds
 
 Also: the DS18B20 addresses must be read from the first-boot log and written in
-`control-bus-sensors.yaml`, and the pH/ORP calibration coefficients (`cal_ph_slope`,
-`cal_ph_offset`, `cal_orp_slope`, `cal_orp_offset` in `control-logic.yaml`) must be derived
-from a two-point calibration with buffer solutions. The full list of checks is
+`control-bus-sensors.yaml`, and pH/ORP must be calibrated from the panel (two points,
+buffer solutions, selector in MANUAL). The thresholds shown in the panel's Parameters
+page are saved in flash; their first-boot values are the substitutions, and `rst|par`
+restores them. Change the display `settings_pin` (default `1234`). The full list of checks is
 in the [bring-up checklist](../docs/bring-up.md).
 
 ## Simulator and demo
@@ -74,7 +81,11 @@ curves:
 
 ```
 python spb_simulator.py COM7 --demo --speed 90
+python spb_simulator.py --selftest     # protocol self-test, no serial port
 ```
+
+The simulator speaks the same S/P/G/A frames and applies the same accept/refuse rules as
+the board, including calibration and the scheduler; press `h` for its keys.
 
 and in `spb-display.yaml` set `trend_interval_s: "2"`. One real second is then 90
 simulated seconds, so the Trends charts show about 12 simulated hours in 8
@@ -114,8 +125,9 @@ cools. Without `--demo` the simulator sends fast test waves.
 - The CH32V003 expander uses an external component
   (`github.com/fuzzybear62/esphome-waveshare_io_ch32v003`), pinned to a commit:
   adjustable backlight and panel/touch reset.
-- Eight LVGL pages: Home, Filtration, Chemistry, Valves, Alarms, Maintenance,
-  Commands, Trends. The navigation column, the header and the status bar live in
+- Sixteen LVGL pages: Home, Filtration, Scheduler, Chemistry, Valves, Alarms (two
+  pages), Maintenance, Commands, Synoptic, Trends and the Settings group (menu, PIN,
+  Wi-Fi, Parameters, Calibration). The navigation column, the header and the status bar live in
   the `top_layer`, so they exist once instead of eight times. If the touch ever
   stops responding on the pages, that is the first place to look.
 - **Trends page.** Two charts: pH and ORP, and pool temperature and main flow.
@@ -124,5 +136,8 @@ cools. Without `--demo` the simulator sends fast test waves.
   seconds (default 30), `trend_points` samples per chart (default 240, that is
   the last 2 hours); a lost link draws a gap. The history lives in RAM and is
   lost at reset.
+- **Language.** The panel always offers Italian and English (Settings). English is only
+  the default at first boot; the choice is saved in flash. Refusal reasons arrive in
+  English from the board and are translated by the panel.
 - Only the visible page is updated, and every label is rewritten only if its text
   really changed.

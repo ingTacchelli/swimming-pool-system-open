@@ -1,0 +1,174 @@
+# =============================================================================
+# SPB - control board: FILTRATION SCHEDULE
+#
+# With the selector in AUTO the filtration pump starts and stops by itself,
+# following three choices made from the panel (stored in flash; the program
+# starts OFF: nothing changes in behaviour until you switch it on):
+#
+#   gpr  program: 0 off, 1 daily, 2 weekly, 3 winter
+#   gmo  mode: 0 high, 1 normal, 2 gentle
+#   gfv  photovoltaic (0/1): filtration only during daylight hours
+#   gsh  SHOCK filtration (0/1): with the selector in AUTO the pump runs
+#        continuously, with no window and no target, until you clear the tick.
+#        It wins over program, photovoltaic and clock. It is NOT stored in flash:
+#        after a restart it is off.
+#
+# The FILTRATION HOURS PER DAY are not typed in: they come from program + mode
+# (table below). They are starting values chosen by the author, to be tuned on
+# your pool (volume and pump flow: ideally at least one full turnover per day).
+#
+#   hours per day            high    normal   gentle
+#   daily                      8        5        3
+#   weekly Mon-Fri             7        5        3
+#   weekly Sat-Sun            10        8        5     (more use at the weekend)
+#   winter                     4        3        2
+#
+# The time windows do NOT have a screen yet: they are board parameters (change
+# them with the set command, or from Home Assistant if you expose them):
+#   gin/gfi  normal window       (minutes from midnight, default 08:00-22:00)
+#   gvi/gvf  "daylight" window for photovoltaic (default 08:00-19:00)
+# The sun is NOT measured: "daylight hours" is a fixed window.
+#
+# Rule: inside the window the pump runs until today's running time reaches the
+# target, then stops until the next day. The accumulated time is reset at
+# midnight and at every board restart (it is not stored in flash: after a restart
+# the pump may therefore run a few hours more, never fewer). Windows crossing
+# midnight (e.g. 22:00-06:00) are allowed.
+#
+# The program drives the pump ONLY with the selector in AUTO and outside a
+# backwash. In MANUAL or ZERO it does nothing and never stops a pump you started
+# yourself. If the board has no time (Wi-Fi/SNTP missing) it does not start.
+#
+# G frame to the panel (every 2 s and after every set):
+#   G|pr|mo|fv|sh|in|fi|vi|vf|h0..h6|ac|tg|st|
+#   h0..h6 = target of each day (minutes, Monday = 0), ac = minutes run today,
+#   tg = today's target, st = 0 off, 1 outside the window, 2 running,
+#   3 target reached, 4 selector not in AUTO, 5 time not available, 6 target zero,
+#   7 shock running.
+# =============================================================================
+
+# The clock (time: local_time, SNTP, timezone from spb-control.yaml) is defined in control-logic.yaml.
+
+globals:
+  - {id: sch_program, type: int, restore_value: true, initial_value: '0'}
+  - {id: sch_mode, type: int, restore_value: true, initial_value: '1'}
+  - {id: sch_pv, type: int, restore_value: true, initial_value: '0'}
+  - {id: sch_start, type: int, restore_value: true, initial_value: '480'}
+  - {id: sch_end, type: int, restore_value: true, initial_value: '1320'}
+  - {id: sch_pv_start, type: int, restore_value: true, initial_value: '480'}
+  - {id: sch_pv_end, type: int, restore_value: true, initial_value: '1140'}
+  - {id: sch_shock, type: int, restore_value: false, initial_value: '0'}
+  - {id: sch_run_s, type: uint32_t, restore_value: false, initial_value: '0'}
+  - {id: sch_day, type: int, restore_value: false, initial_value: '-1'}
+  - {id: sch_running, type: bool, restore_value: false, initial_value: 'false'}
+  - {id: sch_state, type: int, restore_value: false, initial_value: '0'}
+  - {id: sch_target, type: int, restore_value: false, initial_value: '0'}
+
+script:
+  - id: send_schedule
+    mode: restart
+    then:
+      - lambda: |-
+          // filtration minutes per program / mode / day type (see the table above)
+          static const int H[4][3][2] = {
+            { {0, 0},     {0, 0},     {0, 0}     },     // off
+            { {480, 480}, {300, 300}, {180, 180} },     // daily
+            { {420, 600}, {300, 480}, {180, 300} },     // weekly (Mon-Fri, Sat-Sun)
+            { {240, 240}, {180, 180}, {120, 120} } };   // winter
+          const int pr = id(sch_program) < 0 || id(sch_program) > 3 ? 0 : id(sch_program);
+          const int mo = id(sch_mode) < 0 || id(sch_mode) > 2 ? 1 : id(sch_mode);
+          int h[7];
+          for (int d = 0; d < 7; d++) h[d] = H[pr][mo][d >= 5 ? 1 : 0];
+          char body[300];
+          snprintf(body, sizeof(body),
+            "G|pr=%d|mo=%d|fv=%d|sh=%d|in=%d|fi=%d|vi=%d|vf=%d"
+            "|h0=%d|h1=%d|h2=%d|h3=%d|h4=%d|h5=%d|h6=%d|ac=%d|tg=%d|st=%d|",
+            pr, mo, id(sch_pv), id(sch_shock) ? 1 : 0, id(sch_start), id(sch_end),
+            id(sch_pv_start), id(sch_pv_end),
+            h[0], h[1], h[2], h[3], h[4], h[5], h[6],
+            (int) (id(sch_run_s) / 60), id(sch_target), id(sch_state));
+          uint8_t x = 0;
+          for (const char *p = body; *p; p++) x ^= (uint8_t) *p;
+          char out[320];
+          snprintf(out, sizeof(out), "%s*%02X\n", body, x);
+          id(uart_panel).write_str(out);
+
+interval:
+  - interval: 2s
+    then:
+      - script.execute: send_schedule
+
+  # once a second: count, decide, command
+  - interval: 1s
+    then:
+      - lambda: |-
+          auto t = id(local_time).now();
+          const bool auto_ok = id(selector_auto).state && !id(in_backwash);
+          const bool shock = id(sch_shock) != 0;
+          if (t.is_valid()) {
+            if (t.day_of_year != id(sch_day)) {
+              id(sch_day) = t.day_of_year;
+              id(sch_run_s) = 0;
+            }
+            if (id(pump_running).state) id(sch_run_s)++;
+          } else if (!shock) {
+            id(sch_state) = 5;
+            return;
+          }
+
+          static const int H[4][3][2] = {
+            { {0, 0},     {0, 0},     {0, 0}     },
+            { {480, 480}, {300, 300}, {180, 180} },
+            { {420, 600}, {300, 480}, {180, 300} },
+            { {240, 240}, {180, 180}, {120, 120} } };
+          const int pr = id(sch_program) < 0 || id(sch_program) > 3 ? 0 : id(sch_program);
+          const int mo = id(sch_mode) < 0 || id(sch_mode) > 2 ? 1 : id(sch_mode);
+          int tgt = 0, now_min = 0;
+          if (t.is_valid()) {
+            // Monday = 0 (ESPHome: Sunday = 1 ... Saturday = 7)
+            const int dow = (t.day_of_week + 5) % 7;
+            tgt = H[pr][mo][dow >= 5 ? 1 : 0];
+            now_min = t.hour * 60 + t.minute;
+          }
+          id(sch_target) = shock ? 1440 : tgt;
+
+          const int ini = id(sch_pv) ? id(sch_pv_start) : id(sch_start);
+          const int fin = id(sch_pv) ? id(sch_pv_end) : id(sch_end);
+          bool in_window;
+          if (ini == fin) in_window = false;
+          else if (ini < fin) in_window = now_min >= ini && now_min < fin;
+          else in_window = now_min >= ini || now_min < fin;
+          const bool reached = id(sch_run_s) >= (uint32_t) tgt * 60U;
+
+          if (shock) {
+            id(sch_state) = auto_ok ? 7 : 4;
+          } else if (pr == 0) {
+            id(sch_state) = 0;
+          } else if (!auto_ok) {
+            id(sch_state) = 4;
+          } else if (tgt <= 0) {
+            id(sch_state) = 6;
+          } else if (reached) {
+            id(sch_state) = 3;
+          } else if (!in_window) {
+            id(sch_state) = 1;
+          } else {
+            id(sch_state) = 2;
+          }
+
+          // outside AUTO the program does not command: the pump belongs to the operator
+          if (!auto_ok) { id(sch_running) = false; return; }
+
+          const bool wanted = (id(sch_state) == 2 || id(sch_state) == 7);
+          if (wanted && !id(sch_running)) {
+            auto call = id(vfd_setpoint).make_call();
+            call.set_value(id(p_freq_normal));
+            call.perform();
+            id(vfd_run).turn_on();
+            id(sch_running) = true;
+            ESP_LOGI("schedule", "pump start (today %u s of %d min)", (unsigned) id(sch_run_s), tgt);
+          } else if (!wanted && id(sch_running)) {
+            id(vfd_run).turn_off();
+            id(sch_running) = false;
+            ESP_LOGI("schedule", "pump stop (state %d)", id(sch_state));
+          }

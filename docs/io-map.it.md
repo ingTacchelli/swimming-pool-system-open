@@ -16,8 +16,9 @@ separata e porta solo il display, il suo controller touch e il link seriale.
 | Loop di corrente | 4-20 mA | 6 | INA3221 × 2 su shunt da 5,6 Ω | 0x40, 0x41 |
 
 Il fronte potenziometrico ha bisogno di una rail negativa per l'amplificatore,
-prodotta in locale da una pompa di carica. Due dei sei loop sono usati per i
-trasmettitori secondari di pH e ORP; quattro sono liberi.
+prodotta in locale da una pompa di carica. Quattro dei sei loop sono usati: 1 e 2 leggono i trasmettitori di
+pressione del filtro (monte e valle, per il differenziale), 3 e 4 i trasmettitori
+secondari di pH e ORP; 5 e 6 sono liberi.
 
 ### Ingressi digitali e di conteggio
 

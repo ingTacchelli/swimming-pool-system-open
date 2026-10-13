@@ -78,8 +78,8 @@ MCP4018), 100 kHz, su GPIO8 e GPIO9.
 | 0x20 | MCP23017 | 16 ingressi a contatto pulito, 5 usati |
 | 0x2F | MCP4018 | potenziometro digitale, riferimento velocità VFD (CN6) |
 | 0x48 | ADS1115 | 4 canali analogici, 16 bit, fondo scala 4,096 V |
-| 0x40 | INA3221 #1 | loop di corrente da 1 a 3 |
-| 0x41 | INA3221 #2 | loop di corrente da 4 a 6 |
+| 0x40 | INA3221 #1 | loop 1-3: pressione filtro monte / valle, pH secondario |
+| 0x41 | INA3221 #2 | loop 4-6: ORP secondario, 2 liberi |
 
 L'MCP4018 è montato sulla scheda ma il firmware non lo usa.
 
@@ -122,8 +122,18 @@ bus, è il primo posto dove guardare.
 
 ### INA3221 — 0x40 e 0x41
 
-Sei ingressi 4-20 mA su shunt da 5,6 Ω. Due sono usati, per i trasmettitori
-secondari di pH e ORP; gli altri quattro sono liberi.
+Sei ingressi 4-20 mA su shunt da 5,6 Ω. Quattro sono usati:
+
+| Loop | Segnale |
+|---|---|
+| 1 | pressione filtro, monte (fondo scala `press_4_20_full_scale_bar`, default 4 bar: **da confermare sul datasheet del trasmettitore**) |
+| 2 | pressione filtro, valle |
+| 3 | trasmettitore pH secondario |
+| 4 | trasmettitore ORP secondario |
+| 5, 6 | liberi |
+
+La differenza tra i loop 1 e 2 è la pressione differenziale del filtro; sopra
+`dp_backwash_bar` per 5 minuti la scheda consiglia un controlavaggio.
 
 ## Pannello touch
 

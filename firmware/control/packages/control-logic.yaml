@@ -1,9 +1,14 @@
 # =============================================================================
 # SPB - control board: calibrations, dosing permissives, procedures
+#
+# Thresholds (p_*) and calibration are persistent globals defined in
+# control-settings.yaml; the display edits them with the "set" and cal* commands.
 # =============================================================================
 
 globals:
   # --- probe calibration (line pH = m*V + q, same for ORP) -------------------
+  # Starting values are placeholders. They are overwritten by a two-point
+  # calibration (calp/calo commands), which also sets the *_valid flag.
   - id: cal_ph_slope
     type: float
     restore_value: true
@@ -75,18 +80,20 @@ script:
       - logger.log: "Backwash: start"
       # 1. stop the pump and suspend dosing
       - script.execute: go_to_safe_state
-      - number.set:
-          id: vfd_setpoint
-          value: 0
+      # The pump is stopped with the run command, not with a 0 Hz reference:
+      # vfd_setpoint has min_value = freq_min_hz and ESPHome discards any value
+      # below the minimum.
+      - switch.turn_off: vfd_run
       - delay: 10s
-      # 2. (the multiport valve is manual on this plant: only a timed wait)
+      # 2. (the multiport valve is assumed to be manual: only a timed wait)
       - delay: ${backwash_wash_s}s
       # 3. rinse
       - delay: ${backwash_rinse_s}s
       # 4. back to filtration
       - number.set:
           id: vfd_setpoint
-          value: ${freq_normal_hz}
+          value: !lambda 'return id(p_freq_normal);'
+      - switch.turn_on: vfd_run
       - lambda: 'id(in_backwash) = false;'
       - logger.log: "Backwash: done"
 
@@ -105,8 +112,8 @@ interval:
 # system clock + counters reset at midnight
 time:
   - platform: sntp
-    id: ora_locale
-    timezone: Europe/Rome
+    id: local_time
+    timezone: ${timezone}
     on_time:
       - seconds: 0
         minutes: 0
@@ -131,14 +138,14 @@ binary_sensor:
     id: c02_main_flow
     lambda: |-
       if (isnan(id(main_pulses).state)) return false;
-      return id(main_pulses).state >= ${flow_min_main};
+      return id(main_pulses).state >= id(p_flow_main);
 
   - platform: template
     name: "C03 measuring cell flow"
     id: c03_cell_flow
     lambda: |-
       if (isnan(id(cell_pulses).state)) return false;
-      return id(cell_pulses).state >= ${flow_min_cell};
+      return id(cell_pulses).state >= id(p_flow_cell);
 
   - platform: template
     name: "C04 valid pH reading"
@@ -159,14 +166,14 @@ binary_sensor:
     id: c06_ph_agree
     lambda: |-
       if (isnan(id(ph_primary).state) || isnan(id(ph_secondary).state)) return false;
-      return fabs(id(ph_primary).state - id(ph_secondary).state) <= ${ph_disagreement_threshold};
+      return fabs(id(ph_primary).state - id(ph_secondary).state) <= id(p_ph_mismatch);
 
   - platform: template
     name: "C07 ORP probes agree"
     id: c07_orp_agree
     lambda: |-
       if (isnan(id(orp_primary).state) || isnan(id(orp_secondary).state)) return false;
-      return fabs(id(orp_primary).state - id(orp_secondary).state) <= ${orp_disagreement_threshold};
+      return fabs(id(orp_primary).state - id(orp_secondary).state) <= id(p_orp_mismatch);
 
   - platform: template
     name: "C08 valid pH calibration"
@@ -197,6 +204,20 @@ binary_sensor:
     name: "C13 selector in AUTO"
     id: c13_selector_auto
     lambda: 'return id(selector_auto).state;'
+
+  # Not a dosing permissive and not counted as an alarm: it is only a notice.
+  # Dirty filter = differential pressure (upstream - downstream) above the
+  # threshold for 5 continuous minutes, with the pump running and outside a backwash.
+  - platform: template
+    name: "Filter backwash advised"
+    id: backwash_advised
+    lambda: |-
+      if (!id(pump_running).state || id(in_backwash)) return false;
+      if (isnan(id(delta_p).state)) return false;
+      return id(delta_p).state >= id(p_dp_backwash);
+    filters:
+      - delayed_on: 5min
+      - delayed_off: 30s
 
   - platform: template
     name: "Dosing enabled"
@@ -243,10 +264,10 @@ sensor:
     update_interval: 60s
     lambda: |-
       if (isnan(id(tank1_level).state) || id(dose_s_acid) < 10) return {};
-      float litri_residui = id(tank1_level).state / 100.0f * ${tank_litres};
-      float litri_al_giorno = id(dose_s_acid) * ${dosing_pump_litres_per_s};
-      if (litri_al_giorno <= 0.0f) return {};
-      return litri_residui / litri_al_giorno;
+      float litres_left = id(tank1_level).state / 100.0f * ${tank_litres};
+      float litres_per_day = id(dose_s_acid) * ${dosing_pump_litres_per_s};
+      if (litres_per_day <= 0.0f) return {};
+      return litres_left / litres_per_day;
 
   - platform: template
     name: "Chlorine autonomy"
@@ -256,10 +277,10 @@ sensor:
     update_interval: 60s
     lambda: |-
       if (isnan(id(tank2_level).state) || id(dose_s_chlorine) < 10) return {};
-      float litri_residui = id(tank2_level).state / 100.0f * ${tank_litres};
-      float litri_al_giorno = id(dose_s_chlorine) * ${dosing_pump_litres_per_s};
-      if (litri_al_giorno <= 0.0f) return {};
-      return litri_residui / litri_al_giorno;
+      float litres_left = id(tank2_level).state / 100.0f * ${tank_litres};
+      float litres_per_day = id(dose_s_chlorine) * ${dosing_pump_litres_per_s};
+      if (litres_per_day <= 0.0f) return {};
+      return litres_left / litres_per_day;
 
 text_sensor:
   - platform: template

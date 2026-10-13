@@ -33,8 +33,15 @@ per la revisione successiva.
 - **Registri dell'inverter.** La scala del registro della corrente di uscita
   (FD03) e il bit di marcia di FA00 vanno verificati sul proprio drive (vedi
   [bring-up.it.md](bring-up.it.md)).
-- **I coefficienti di calibrazione pH e ORP** in `control-logic.yaml` sono
-  segnaposto: vanno ricavati da una calibrazione a due punti.
+- **La calibrazione non è fatta in fabbrica.** Finché non si esegue la calibrazione a due
+  punti dal pannello, i coefficienti sono segnaposto e il dosaggio resta bloccato.
+- **Fondo scala pressione** (4 bar a 20 mA) è un'ipotesi: va confermato sul
+  datasheet del trasmettitore.
+- **Scenari.** Il comando `scen` esiste sul pannello ma la scheda non lo implementa
+  ancora; usa il programmatore.
+- **Programmatore e orologio.** I programmi dipendono dall'ora SNTP (vedi il limite
+  dell'orologio sopra); la modalità shock non viene salvata in flash di proposito.
+- **PIN impostazioni di default 1234**: cambia `settings_pin` prima dell'uso.
 - **Refresh del display.** Il componente del pannello usa un solo framebuffer,
   quindi una parte degli artefatti nel refresh è inevitabile per costruzione.
   Per eliminarli serve una copia locale del componente con doppio framebuffer.
@@ -43,5 +50,5 @@ per la revisione successiva.
   disegnati da codice, fuori dallo schema LVGL di ESPHome; dopo aver aperto la
   pagina controlla il log di avvio per errori di allocazione (vedi
   [bring-up.it.md](bring-up.it.md)).
-- **Solo inglese.** Nomi delle entità, etichette del pannello e motivi di
-  rifiuto sono in inglese; non c'è selezione della lingua.
+- **Lingue.** Nomi delle entità e messaggi della scheda sono in inglese; il pannello
+  offre inglese e italiano (Impostazioni), con l'inglese come predefinito al primo avvio.

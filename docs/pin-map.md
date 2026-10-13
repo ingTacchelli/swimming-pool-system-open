@@ -74,8 +74,8 @@ potentiometer), 100 kHz, on GPIO8 and GPIO9.
 | 0x20 | MCP23017 | 16 dry-contact inputs, 5 used |
 | 0x2F | MCP4018 | digital potentiometer, VFD speed reference (CN6) |
 | 0x48 | ADS1115 | 4 analog channels, 16 bit, 4.096 V full scale |
-| 0x40 | INA3221 #1 | current loops 1 to 3 |
-| 0x41 | INA3221 #2 | current loops 4 to 6 |
+| 0x40 | INA3221 #1 | loops 1-3: filter pressure upstream / downstream, secondary pH |
+| 0x41 | INA3221 #2 | loops 4-6: secondary ORP, 2 spare |
 
 The MCP4018 is fitted on the board but the firmware does not use it.
 
@@ -117,8 +117,18 @@ on the bus, look here first.
 
 ### INA3221 — 0x40 and 0x41
 
-Six 4-20 mA inputs on 5.6 Ω shunts. Two are used, for the secondary pH and ORP
-transmitters; the other four are free.
+Six 4-20 mA inputs on 5.6 Ω shunts. Four are used:
+
+| Loop | Signal |
+|---|---|
+| 1 | filter pressure, upstream (full scale `press_4_20_full_scale_bar`, default 4 bar: **confirm on the transmitter datasheet**) |
+| 2 | filter pressure, downstream |
+| 3 | secondary pH transmitter |
+| 4 | secondary ORP transmitter |
+| 5, 6 | free |
+
+The difference between loops 1 and 2 is the filter differential pressure; above
+`dp_backwash_bar` for 5 minutes the board advises a backwash.
 
 ## Touch panel
 
