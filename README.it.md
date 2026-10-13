@@ -76,8 +76,8 @@ sono ancora da confermare (vedi [docs/limitations.it.md](docs/limitations.it.md)
 la [bozza del cablaggio](docs/wiring.it.md)), e connettori, firmware e protocollo
 possono cambiare nella prossima revisione.
 
-È un progetto di livello amatoriale condiviso per studio, feedback e uso non
-commerciale, e **non** è certificato per alcuno schema normativo. Leggi
+È un progetto di livello amatoriale condiviso per studio e feedback, e **non** è
+certificato per alcuno schema normativo. Leggi
 l'[avviso di sicurezza](#avviso-di-sicurezza).
 
 ## Aiutaci a migliorarlo
@@ -185,7 +185,7 @@ rilasciare prodotti chimici o far funzionare le apparecchiature a secco.
 | [`firmware/`](firmware/README.it.md) | configurazione ESPHome di entrambe le schede e simulatore Python della scheda di controllo |
 | [`docs/`](docs/) | mappa dei pin, mappa I/O, protocollo UART, limiti, checklist di prima accensione |
 
-Ogni documento esiste in inglese e in italiano (`*.it.md`).
+I testi delle licenze sono in [`LICENSES/`](LICENSES/). Ogni documento esiste in inglese e in italiano (`*.it.md`).
 
 ## Contatti
 
@@ -197,7 +197,14 @@ oppure una Discussion in questo repository.
 
 ## Licenza
 
-Distribuito con licenza [Creative Commons Attribuzione-NonCommerciale-Condividi
-allo stesso modo 4.0 Internazionale (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/).
-Vedi [LICENSE](LICENSE). L'uso commerciale non è coperto da questa licenza:
-contattami per parlarne.
+Open source, con una licenza per ogni tipo di materiale (riepilogo in
+[LICENSE](LICENSE)):
+
+| Materiale | Licenza |
+|---|---|
+| Hardware (`hardware/`) | [CERN-OHL-S v2](LICENSES/CERN-OHL-S-2.0.txt) — CERN Open Hardware Licence, fortemente reciproca |
+| Firmware e simulatore (`firmware/`) | [GPL-3.0-or-later](LICENSES/GPL-3.0-or-later.txt) |
+| Documentazione, immagini e video | [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt) |
+
+Puoi costruirlo, modificarlo, installarlo e venderlo, anche per scopi commerciali,
+purché mantieni l'attribuzione e rilasci le modifiche con le stesse licenze.

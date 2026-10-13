@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andrea Tacchelli
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 # SPB - control board: I2C bus, expander, sensor acquisition
 #

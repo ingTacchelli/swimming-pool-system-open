@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andrea Tacchelli
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 # SPB Swimming Pool Board - DISPLAY PANEL firmware (ESPHome)
 # Waveshare ESP32-S3-Touch-LCD-7B (1024x600, GT911 touch, CH32V003 expander)

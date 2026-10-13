@@ -73,8 +73,8 @@ be confirmed (see [docs/limitations.md](docs/limitations.md) and the
 [wiring draft](docs/wiring.md)), and connectors, firmware and protocol may change
 in the next revision.
 
-It is a hobbyist-grade design shared for study, feedback and non-commercial use,
-and is **not** certified for any regulatory scheme. Read the
+It is a hobbyist-grade design shared for study and feedback, and is **not**
+certified for any regulatory scheme. Read the
 [safety notice](#safety-notice).
 
 ## Help us improve it
@@ -180,7 +180,7 @@ chemicals or run equipment dry.
 | [`firmware/`](firmware/README.md) | ESPHome configuration of both boards, and a Python simulator of the control board |
 | [`docs/`](docs/) | pin map, I/O map, UART protocol, limitations, bring-up checklist |
 
-Every document exists in English and Italian (`*.it.md`).
+Licence texts are in [`LICENSES/`](LICENSES/). Every document exists in English and Italian (`*.it.md`).
 
 ## Contact
 
@@ -192,7 +192,14 @@ this repository.
 
 ## License
 
-Licensed under [Creative Commons Attribution-NonCommercial-ShareAlike 4.0
-International (CC BY-NC-SA 4.0)](https://creativecommons.org/licenses/by-nc-sa/4.0/).
-See [LICENSE](LICENSE). Commercial use is not covered by this license: get in
-touch to discuss it.
+Open source, with one licence for each kind of material (summary in
+[LICENSE](LICENSE)):
+
+| Material | License |
+|---|---|
+| Hardware (`hardware/`) | [CERN-OHL-S v2](LICENSES/CERN-OHL-S-2.0.txt) — CERN Open Hardware Licence, strongly reciprocal |
+| Firmware and simulator (`firmware/`) | [GPL-3.0-or-later](LICENSES/GPL-3.0-or-later.txt) |
+| Documentation, images and video | [CC BY-SA 4.0](LICENSES/CC-BY-SA-4.0.txt) |
+
+You may build, modify, install and sell it, also commercially, as long as you
+keep the attribution and release your changes under the same licences.

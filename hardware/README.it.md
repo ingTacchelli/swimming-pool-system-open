@@ -21,6 +21,14 @@ due strati; l'archivio contiene un `How-to-order-PCB.txt` che rimanda alla guida
 all'ordine di EasyEDA. I componenti in `bom.csv` riportano il codice LCSC nella
 colonna `SupplierPart`.
 
+## Licenza
+
+Il progetto hardware è rilasciato con la CERN Open Hardware Licence Version 2,
+Strongly Reciprocal ([CERN-OHL-S-2.0](../LICENSES/CERN-OHL-S-2.0.txt)). Se produci
+o distribuisci una versione modificata, devi renderne disponibile il sorgente
+completo (schema, layout, BOM) con la stessa licenza.
+Sorgente: https://github.com/ingTacchelli/swimming-pool-system-open
+
 ## Note
 
 - Le serigrafie sulla scheda (nomi di connettori e relè) sono in italiano.

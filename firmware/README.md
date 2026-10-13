@@ -141,3 +141,9 @@ cools. Without `--demo` the simulator sends fast test waves.
   English from the board and are translated by the panel.
 - Only the visible page is updated, and every label is rewritten only if its text
   really changed.
+
+## License
+
+The firmware and the simulator are released under the GNU General Public License,
+version 3 or later ([GPL-3.0-or-later](../LICENSES/GPL-3.0-or-later.txt)). Each
+source file carries an SPDX header.

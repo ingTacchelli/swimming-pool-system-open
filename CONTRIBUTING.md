@@ -13,8 +13,11 @@ Feedback is welcome: technical, practical and commercial.
 - **Pull requests** are welcome for documentation and firmware. For hardware
   changes, open an Issue first so the change can be discussed.
 
-By contributing, you agree that your contribution is released under the same
-license as the project (CC BY-NC-SA 4.0).
+By contributing, you agree that your contribution is released under the licence
+of the files you change: CERN-OHL-S-2.0 for hardware, GPL-3.0-or-later for
+firmware, CC-BY-SA-4.0 for documentation (see [LICENSE](LICENSE)). You also
+grant the project author the right to use your contribution in other versions
+of the project, including commercial versions released under different terms.
 
 When you report a problem with a built board, please say which DevKitC-1
 revision you use, which firmware you flashed, and whether the panel and the
@@ -33,8 +36,11 @@ Il feedback è benvenuto: tecnico, pratico e commerciale.
 - Le **pull request** sono benvenute per documentazione e firmware. Per modifiche
   all'hardware apri prima una Issue, così se ne può discutere.
 
-Contribuendo accetti che il tuo contributo sia rilasciato con la stessa licenza
-del progetto (CC BY-NC-SA 4.0).
+Contribuendo accetti che il tuo contributo sia rilasciato con la licenza dei file
+che modifichi: CERN-OHL-S-2.0 per l'hardware, GPL-3.0-or-later per il firmware,
+CC-BY-SA-4.0 per la documentazione (vedi [LICENSE](LICENSE)). Concedi inoltre
+all'autore del progetto il diritto di usare il tuo contributo in altre versioni
+del progetto, comprese versioni commerciali distribuite con condizioni diverse.
 
 Quando segnali un problema su una scheda costruita, indica quale revisione di
 DevKitC-1 usi, quale firmware hai caricato e se il pannello e la scheda di

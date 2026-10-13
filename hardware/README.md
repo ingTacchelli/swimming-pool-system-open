@@ -21,6 +21,14 @@ the archive includes a `How-to-order-PCB.txt` that points to the EasyEDA orderin
 guide. The parts in `bom.csv` carry the LCSC part number in the `SupplierPart`
 column.
 
+## License
+
+The hardware design is released under the CERN Open Hardware Licence Version 2,
+Strongly Reciprocal ([CERN-OHL-S-2.0](../LICENSES/CERN-OHL-S-2.0.txt)). If you
+manufacture or distribute a modified version, you must make its complete
+source (schematic, layout, BOM) available under the same licence.
+Source location: https://github.com/ingTacchelli/swimming-pool-system-open
+
 ## Notes
 
 - Silkscreen labels on the board (connector and relay names) are in Italian.

@@ -144,3 +144,9 @@ prova veloci.
   in inglese dalla scheda e il pannello li traduce.
 - Si aggiorna solo la pagina visibile, e ogni etichetta viene riscritta solo se il
   testo è cambiato davvero.
+
+## Licenza
+
+Il firmware e il simulatore sono rilasciati con la GNU General Public License,
+versione 3 o successiva ([GPL-3.0-or-later](../LICENSES/GPL-3.0-or-later.txt)).
+Ogni file sorgente riporta un'intestazione SPDX.

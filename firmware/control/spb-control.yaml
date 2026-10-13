@@ -1,3 +1,5 @@
+# SPDX-FileCopyrightText: 2026 Andrea Tacchelli
+# SPDX-License-Identifier: GPL-3.0-or-later
 # =============================================================================
 # SPB Swimming Pool Board - CONTROL BOARD firmware (ESPHome)
 # ESP32-S3-DevKitC-1 (N16R8) plugged into the custom PCB.
